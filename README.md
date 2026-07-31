@@ -16,7 +16,7 @@ When an agent changes UI code, this plugin makes sure a Percy build runs, the di
 /plugin install percy-visual-testing
 ```
 
-**Cursor · Codex · Antigravity · Gemini CLI** — any IDE that reads `AGENTS.md` (all major agents do). One command, run in your repo:
+**Cursor · Codex · Antigravity · Gemini (Code Assist agent mode or CLI)** — any IDE that reads `AGENTS.md` (all major agents do). One command, run in your repo:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/percy/percy-visual-testing-agent/main/install.sh | bash
 ```
@@ -26,9 +26,9 @@ curl -fsSL https://raw.githubusercontent.com/percy/percy-visual-testing-agent/ma
 curl -fsSL https://raw.githubusercontent.com/percy/percy-visual-testing-agent/main/install.sh | bash -s -- --copilot
 ```
 
-The installer only touches your repo: skills → `.percy/skills/`, a short section appended to your `AGENTS.md`, and (with `--copilot`) prompts → `.github/prompts/`. Prefer manual? Copy those files from this repo — that's all it does.
+The installer only touches your repo: skills → `.percy/skills/`, a short section appended to your `AGENTS.md`, a one-line `GEMINI.md` pointer (created or appended — Gemini reads `GEMINI.md` by default, not `AGENTS.md`), and (with `--copilot`) prompts → `.github/prompts/`. Prefer manual? Copy those files from this repo — that's all it does.
 
-Outside Claude Code/Copilot (Cursor, Codex, Antigravity, any `AGENTS.md` IDE), `/percy:X` means: read `.percy/skills/percy-X.md` and follow it.
+Outside Claude Code/Copilot (Cursor, Codex, Antigravity, Gemini Code Assist agent mode in VS Code, Gemini CLI — any `AGENTS.md` IDE) there are no `/percy:X` slash commands. Ask in plain words ("run the percy setup workflow"), or say: read `.percy/skills/percy-X.md` and follow it.
 
 ---
 
@@ -153,7 +153,7 @@ The plugin produces **per-comparison** verdicts (not per-cluster, not per-snapsh
 1. **Percy already encodes the signal in text.** Each flagged region carries `change_reason` — Percy's own judgment, e.g. *"deliberate CSS color change… not a dynamic variation"* vs *"could be an unintended CSS regression"*. Reasoning over this + code context recovers what a pixel pass would conclude, because Percy already looked at the pixels and wrote down what it saw.
 2. **Percy-native signal.** Percy's per-region `change_reason` / `change_description` / `visual_quality_reason` come from Percy's own visual classifier — a richer, more specific signal than a generic image-analysis pass. The plugin is built around it.
 
-**The strongest false-positive filter is code context.** If Percy flags a region but no code change in the git diff touches that surface, it's almost certainly dynamic content / fixture variance — not a regression the developer introduced.
+**The strongest false-positive filter is code context.** If Percy flags a region but no code change in the git diff touches that surface, it's almost certainly dynamic content / fixture variance — not a regression the developer introduced. This is what replaced the vision pass.
 
 **Intent ↔ region matching is the agent's job (semantic reasoning).** The plugin doesn't do Python keyword matching — it gathers Percy's data + code context and asks the host agent to reason.
 

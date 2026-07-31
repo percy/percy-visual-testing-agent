@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Percy Visual Testing Agent — one-command install for AGENTS.md-based IDEs
-# (Cursor, Codex, Antigravity, Gemini CLI, and GitHub Copilot with --copilot).
+# (Cursor, Codex, Antigravity, Gemini — Code Assist agent mode or Gemini CLI —
+# and GitHub Copilot with --copilot).
 #
 #   curl -fsSL https://raw.githubusercontent.com/percy/percy-visual-testing-agent/main/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/percy/percy-visual-testing-agent/main/install.sh | bash -s -- --copilot
@@ -8,7 +9,9 @@
 # What it does (all inside YOUR repo, nothing global):
 #   1. Downloads the Percy skills to .percy/skills/
 #   2. Appends a short "Visual review (Percy)" section to your AGENTS.md (creates it if missing)
-#   3. With --copilot: also installs .github/prompts/percy-*.prompt.md so /percy-* slash
+#   3. Creates/updates GEMINI.md with a one-line pointer to AGENTS.md (Gemini Code Assist
+#      and Gemini CLI read GEMINI.md by default, not AGENTS.md)
+#   4. With --copilot: also installs .github/prompts/percy-*.prompt.md so /percy-* slash
 #      commands work in Copilot Chat
 #
 # Claude Code users: don't use this — install natively instead:
@@ -52,7 +55,18 @@ else
   echo "  ✔ AGENTS.md — Percy section already present, skipped"
 fi
 
-# 3. Copilot slash commands (optional)
+# 3. GEMINI.md pointer (append-only; skip if already present). Gemini Code Assist /
+#    Gemini CLI read GEMINI.md by default — a pointer line is enough, and it avoids
+#    touching the user's .gemini/settings.json.
+if ! grep -q "Percy visual review" GEMINI.md 2>/dev/null; then
+  [ -s GEMINI.md ] && echo "" >> GEMINI.md
+  echo "Read AGENTS.md and follow it — it includes the Percy visual review instructions." >> GEMINI.md
+  echo "  ✔ GEMINI.md — Percy pointer added (Gemini Code Assist / Gemini CLI)"
+else
+  echo "  ✔ GEMINI.md — Percy pointer already present, skipped"
+fi
+
+# 4. Copilot slash commands (optional)
 if $COPILOT; then
   mkdir -p .github/prompts
   for s in "${SKILLS[@]}"; do

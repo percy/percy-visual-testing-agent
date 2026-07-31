@@ -32,6 +32,8 @@ When an AI agent (or a human paired with one) changes UI code, the following mus
 
 ## Skills
 
+`/percy:X` is a Claude Code slash command. In IDEs without slash commands (Cursor, Codex, Antigravity, Gemini Code Assist agent mode, Gemini CLI), it is shorthand for: read the corresponding skill file (`.percy/skills/percy-X.md` in an installed repo; `plugins/percy-visual-testing/skills/percy-X/SKILL.md` in this repo) and follow it.
+
 | Skill | When to run | Purpose |
 |---|---|---|
 | `/percy:integrate` | Day 0, project has tests but no Percy | Detect stack, install the matching Percy SDK + `@percy/cli`, wire config, insert the first `percySnapshot()` calls |
