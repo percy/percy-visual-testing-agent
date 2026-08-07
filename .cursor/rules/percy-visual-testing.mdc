@@ -1,0 +1,36 @@
+---
+description: Percy visual testing workflow — enforce a Percy review loop for any UI change.
+globs: ["**/*.tsx", "**/*.jsx", "**/*.vue", "**/*.svelte", "**/*.css", "**/*.scss", "**/*.html"]
+alwaysApply: false
+---
+
+# Percy Visual Testing
+
+When you change UI code in this project, you must complete the Percy review loop before treating the change as done. The full workflow is defined in `AGENTS.md` and the skills under `.percy/skills/` (installed by the one-command installer; in this plugin's own repo they live under `plugins/percy-visual-testing/skills/`).
+
+## Required steps
+
+1. Before opening / updating a PR, run the **percy-visual-intent** workflow:
+   - Summarize the visual changes you intended to make (routes/components touched, what should look different, what should stay the same).
+   - Inject the summary as a `## Percy Visual Intent` section in the PR description.
+
+2. After a Percy build runs for this branch, run the **percy-review** workflow:
+   - Use the BrowserStack MCP server's Percy tools (`percy_get_build`, `percy_get_ai_summary`, `percy_preview_comparison`) to poll until the build completes.
+   - Pull the AI summary and per-comparison classifications + reasoning.
+   - For each comparison, classify against the Visual Intent:
+     - Percy says **bug** + intent doesn't explain it → **likely-bug**
+     - Percy says **no-bug** + region is **not** in intent → **unplanned-change** (flag for human)
+     - Otherwise → **expected**
+
+3. If any likely-bugs are found, run the **percy-gate** workflow:
+   - Surface the bug list to the user with Percy's reasoning.
+   - Recommend rejecting the Percy build and iterating on the fix.
+   - On user confirmation, call Percy reject (via MCP if available, REST otherwise).
+   - Re-iterate up to 3 times; stop early if bug count isn't decreasing or snapshot budget is exhausted.
+
+## Important
+
+- Treat Percy's bug classification as authoritative. Do not soften or override with AI-accuracy disclaimers.
+- Use the user's BrowserStack credentials only — never request them inline.
+- If Percy MCP isn't installed, fall back to Percy REST API (`https://percy.io/api/v1/`).
+- For full skill content, read `plugins/percy-visual-testing/skills/<name>/SKILL.md`.

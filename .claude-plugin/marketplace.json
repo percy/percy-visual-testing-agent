@@ -1,0 +1,30 @@
+{
+  "name": "percy-visual-testing",
+  "owner": {
+    "name": "Percy (BrowserStack)",
+    "url": "https://github.com/percy"
+  },
+  "metadata": {
+    "description": "Visual testing plugin for agentic coding tools — enforces a Percy review loop inside any AI IDE.",
+    "version": "0.3.1"
+  },
+  "plugins": [
+    {
+      "name": "percy-visual-testing",
+      "description": "Enforces a visual-review loop for agent-driven UI changes: capture intent, poll Percy builds, classify diffs with Percy's AI summary, gate the build, and iterate until visually clean. Works in Claude Code, Cursor, Codex, Antigravity, and any AI IDE that reads AGENTS.md.",
+      "author": {
+        "name": "Percy",
+        "url": "https://percy.io"
+      },
+      "homepage": "https://github.com/percy/percy-visual-testing-agent",
+      "tags": [
+        "percy",
+        "visual-testing",
+        "agentic-coding",
+        "ai-review",
+        "browserstack"
+      ],
+      "source": "./plugins/percy-visual-testing"
+    }
+  ]
+}

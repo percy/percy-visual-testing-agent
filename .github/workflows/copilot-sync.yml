@@ -1,0 +1,30 @@
+name: copilot-bundle-sync
+
+# The GitHub Copilot prompt bundle (plugins/percy-visual-testing/copilot/) is
+# GENERATED from the canonical skills (plugins/percy-visual-testing/skills/*/SKILL.md)
+# by scripts/gen-copilot.mjs. This check fails if a SKILL.md was edited without
+# regenerating the bundle, keeping the Copilot experience in sync with the skills
+# that Claude / Cursor / Codex / Antigravity read directly.
+#
+# To fix a failure: run `node scripts/gen-copilot.mjs` and commit the result.
+
+on:
+  pull_request:
+    paths:
+      - 'plugins/percy-visual-testing/skills/**'
+      - 'plugins/percy-visual-testing/copilot/**'
+      - 'scripts/gen-copilot.mjs'
+      - '.github/workflows/copilot-sync.yml'
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify Copilot bundle is up to date
+        run: node scripts/gen-copilot.mjs --check
