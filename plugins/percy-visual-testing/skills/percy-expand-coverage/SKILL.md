@@ -1,6 +1,6 @@
 ---
 name: percy-expand-coverage
-description: "Expand Percy visual coverage in a specific test file. Analyzes the file, finds logical touchpoints that lack a visual checkpoint (after an action, before an assertion, at distinct UI states), proposes percySnapshot() insertions, confirms with you, inserts them, and suggests a build. The 'day-2' companion to /percy:integrate for growing coverage as the app evolves."
+description: "Expand Percy visual coverage in a specific test file. Analyzes the file, finds logical touchpoints that lack a visual checkpoint (after an action, before an assertion, at distinct UI states), proposes percySnapshot() insertions, confirms with you, inserts them, and suggests a build. The 'day-2' companion to /percy-integrate for growing coverage as the app evolves."
 argument-hint: "<path to a test file, e.g. tests/auth/login.spec.ts>"
 ---
 
@@ -8,7 +8,7 @@ argument-hint: "<path to a test file, e.g. tests/auth/login.spec.ts>"
 
 Solves the "day-2" problem: a project already has Percy wired in, but coverage stagnates because adding `percySnapshot()` calls by hand is tedious. Point this skill at one test file and it proposes the visual checkpoints that file is missing.
 
-For a project with **no** Percy yet, run `/percy:integrate` first.
+For a project with **no** Percy yet, run `/percy-integrate` first.
 
 ## Steps
 
@@ -26,11 +26,11 @@ Detect pragmatically:
 - Optionally confirm against Percy: the project has **≥ 1 build** (`GET /builds?page[limit]=1`).
 
 If the project isn't eligible (no builds yet, or it uses screenshots / CLI-URL snapshots rather than the SDK), **stop and warn** — don't insert calls that won't run:
-> "Expanding coverage with AI is currently supported only for projects using `percySnapshot()` via the BrowserStack SDK (not screenshots). Run `/percy:integrate` first, or switch the project to the SDK snapshot path."
+> "Expanding coverage with AI is currently supported only for projects using `percySnapshot()` via the BrowserStack SDK (not screenshots). Run `/percy-integrate` first, or switch the project to the SDK snapshot path."
 
 ### 3. Identify the framework
 
-From the file's imports + the project config, determine the framework so you insert the correct call signature (same table as `/percy:integrate`):
+From the file's imports + the project config, determine the framework so you insert the correct call signature (same table as `/percy-integrate`):
 
 | Framework | `percySnapshot()` call |
 |---|---|
@@ -71,7 +71,7 @@ Let the user approve directly or correct (exclude cases, rename, add one you mis
 Report what was added:
 > "Added **3** `percySnapshot()` commands to `login.spec.ts`. Want me to expand another file, or run a build to verify?"
 
-If the user is done adding files, suggest running a build (`percy exec -- <test command>`) and then `/percy:review`.
+If the user is done adding files, suggest running a build (`percy exec -- <test command>`) and then `/percy-review`.
 
 ## Important
 

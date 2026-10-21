@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Diagnose why Percy isn't working. Runs local diagnostics first (percy doctor, token validity + role, config sanity, SDK + browser checks), matches the result against the ~10 most common stable failures, and for everything else fetches the relevant BrowserStack docs page live at runtime. Docs-referencing by design — the skill carries symptom-category → docs-URL pointers, never copied docs content."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-troubleshoot/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->
@@ -20,6 +20,18 @@ Figures out why Percy isn't working — a build that won't start, an API call th
 **Design rule — no embedded knowledge base.** Percy's docs change; a skill that copies them goes stale. This skill carries **URLs only** and fetches the page content fresh when needed. The only fixes written inline here are the small curated set in Step 3, chosen because they're stable product behavior (auth model, token roles, baseline mechanics) — not docs prose.
 
 If the diagnosis points at a *build-launch* problem (browser, test runner, agent-shell env), the fix lives in `/percy-run-build` Steps 2–2c — reference and follow those steps; do **not** duplicate their content here.
+
+## User-Agent (every Percy API call)
+
+Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
+
+```
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=troubleshoot; install=<install_id>) curl/8.7.1"
+```
+
+- `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
+- `channel` / `install` — `install_channel` / `install_id` from `.percy/config.yml` (`unknown` / `none` if absent). `role` — `repo_role` from the same file (`app` if absent).
+- Never put names, emails, tokens, or repo names in it. Keep the trailing `curl/8.7.1` — Percy's edge has blocked unrecognised agents before.
 
 ## Steps
 
@@ -55,13 +67,13 @@ Doctor launches a browser for the network-capture check — in an Electron-IDE a
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Token token=\"$PERCY_TOKEN\"" \
-  -H "User-Agent: curl/8.7.1" "https://percy.io/api/v1/builds?page%5Blimit%5D=1"
+  -H "User-Agent: $PERCY_PLUGIN_UA" "https://percy.io/api/v1/builds?page%5Blimit%5D=1"
 ```
 
 - No `PERCY_TOKEN` in env → check the project's secrets files (same search order as `/percy-setup` Step 1) before declaring it missing.
 - `401` → token invalid/revoked.
 - `200` for `percy exec` but `403` on **reads** (builds/snapshots/comparisons) → the token is **`write_only`** — uploads work, the review loop breaks. Fix: use the project's `master`-role token (`/percy-setup` Step 1 selects it by `attributes.role == "master"`).
-- Keep the `User-Agent: curl/8.7.1` header on every REST call. Percy's edge may block unrecognized User-Agents (a 403 indistinguishable from an auth failure), and the block can be **intermittent** — it varies by network/IP. Diagnostic order on a 403: retry with the header; if the 403 persists, it's the token role, not the UA.
+- Keep the plugin `User-Agent` (`$PERCY_PLUGIN_UA`, see above) on every REST call. Percy's edge may block unrecognized User-Agents (a 403 indistinguishable from an auth failure), and the block can be **intermittent** — it varies by network/IP. Diagnostic order on a 403: retry with the header; if the 403 persists, it's the token role, not the UA.
 
 **2c. Config sanity.** `./node_modules/.bin/percy config:validate` (validates `.percy.yml` against the schema — surfaces unknown keys, wrong types, deprecated options; `percy config:migrate` upgrades old formats). Also confirm `.percy/config.yml` exists (that's the *plugin's* state file, distinct from `.percy.yml` — if missing, `/percy-setup` hasn't run).
 

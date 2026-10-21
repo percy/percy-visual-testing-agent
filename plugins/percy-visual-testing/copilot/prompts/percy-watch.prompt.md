@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Watch for a Percy build to finish processing (via Percy API polling or GitHub PR check status) and auto-invoke /percy-gate when it's ready. Use when the user has just pushed code / opened a PR and wants the gate to fire automatically when the Percy build completes — no manual /percy-gate invocation needed."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-watch/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->
@@ -23,6 +23,18 @@ Background a poll on a Percy build (or its GitHub PR check) and automatically in
 
 - `.percy/config.yml` exists (run `/percy-setup` if not).
 - A push has happened on the current branch, OR a PR exists with a Percy CI check, OR a build ID has been explicitly provided.
+
+## User-Agent (every Percy API call)
+
+Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
+
+```
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=watch; install=<install_id>) curl/8.7.1"
+```
+
+- `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
+- `channel` / `install` — `install_channel` / `install_id` from `.percy/config.yml` (`unknown` / `none` if absent). `role` — `repo_role` from the same file (`app` if absent).
+- Never put names, emails, tokens, or repo names in it. Keep the trailing `curl/8.7.1` — Percy's edge has blocked unrecognised agents before.
 
 ## Steps
 
@@ -48,7 +60,7 @@ Run a background loop:
 # (Claude Code: Bash with run_in_background, or Monitor tool with a tight grep)
 while :; do
   state=$(curl -sS -H "Authorization: Token token=\"$PERCY_TOKEN\"" \
-    -H "User-Agent: curl/8.7.1" \
+    -H "User-Agent: $PERCY_PLUGIN_UA" \
     "https://percy.io/api/v1/builds?filter[branch]=<branch>&page[limit]=1" \
     | jq -r '.data[0].attributes | "\(.state)|\((.["ai-details"].["all-ai-jobs-completed"]))"')
   echo "[$(date +%H:%M:%S)] $state"
@@ -105,7 +117,7 @@ If the build failed (Path A returned `BUILD-FAILED`, or Path B's Percy check ret
 If the first `/percy-gate` run ended in a **Case B handoff** (needs-human / ambiguous unplanned changes surfaced for the user to decide), the human may then reject the build in Percy after reviewing. To make iteration fire on that decision, optionally keep a light poll on the build's **review-state**:
 
 ```bash
-state=$(curl -sS -H "Authorization: Token token=\"$PERCY_TOKEN\"" -H "User-Agent: curl/8.7.1" \
+state=$(curl -sS -H "Authorization: Token token=\"$PERCY_TOKEN\"" -H "User-Agent: $PERCY_PLUGIN_UA" \
   "https://percy.io/api/v1/builds/<id>" | jq -r '.data.attributes["review-state"]')
 # changes_requested / rejected → invoke /percy-gate (it detects the rejected state via Case D and starts the fix loop)
 ```

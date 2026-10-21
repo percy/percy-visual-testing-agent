@@ -12,7 +12,7 @@ Claude Code, Cursor, Codex, and Antigravity discover the plugin's skills directl
 - **`AGENTS.md`** (repo root) — Copilot reads it automatically as primary
   instructions. This is the *same* file the other IDEs use, so the shared
   workflow + Percy REST/MCP backend carry over with no fork.
-- **`.github/prompts/*.prompt.md`** — Copilot's analog to the `/percy:*`
+- **`.github/prompts/*.prompt.md`** — Copilot's analog to the `/percy-*`
   slash-command skills, invoked as `/percy-review`, `/percy-gate`, … in Copilot
   Chat (VS Code / Visual Studio / JetBrains).
 
@@ -27,7 +27,7 @@ the single source of truth; nothing about the other IDEs changes.
 
 ## Distribution
 
-These read from the **user's** repo, not a marketplace. `/percy:integrate`
+These read from the **user's** repo, not a marketplace. `/percy-integrate`
 scaffolds this bundle into a user repo's `.github/` when the user is on Copilot
 (copying `prompts/` → `.github/prompts/`, `copilot-instructions.md` →
 `.github/copilot-instructions.md`, appending rather than clobbering).

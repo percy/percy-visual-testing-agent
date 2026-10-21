@@ -1,6 +1,6 @@
 ---
-mode: agent
-description: "Enforce the visual review loop before a UI change can ship. Runs /percy-review, then auto-iterates on the fix for anything that needs fixing — likely-bugs, unplanned changes the plugin is confident weren't intended, AND any human-rejected build (including after a manual review of a flagged comparison). Surfaces reasoning, rejects on confirmation, prompts the agent to fix, and re-runs — up to 3 iterations with a delta-gate and snapshot budget. The single skill to run before merging UI changes."
+agent: agent
+description: "The one command for reviewing a Percy build, for developers and QA alike. Developer PR loop: runs /percy-review, surfaces real bugs and unintended changes, rejects on confirmation, has the agent fix them and re-runs (up to 3 iterations, delta-gate, snapshot budget). QA / regression-suite repos (repo_role: regression-suite): morning triage of the latest nightly or regression run — explains each diff from the app PRs merged since the last approved run, approves explained and noise snapshots, flags unexplained ones and anomalies, and reports them the way the team files bugs; no code edits. Reviewing someone else's PR build: approve or request changes plus a PR comment. Every Percy write and every bug report waits for the human's yes."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-gate/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->
 
@@ -20,6 +20,18 @@ In v1, **every reject decision is confirmed by the human** before Percy is actua
 - `/percy-setup` has been run.
 - `.percy/config.yml` exists.
 - A Percy Visual Intent section **should** exist for the current branch (run `/percy-visual-intent` first if not). If missing, the skill enters NO-INTENT degraded mode — see Step 7. Auto-reject and the iteration loop are disabled in that mode.
+
+## User-Agent (every Percy API call)
+
+Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
+
+```
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
+```
+
+- `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
+- `channel` / `install` — `install_channel` / `install_id` from `.percy/config.yml` (`unknown` / `none` if absent). `role` — `repo_role` from the same file (`app` if absent).
+- Never put names, emails, tokens, or repo names in it. Keep the trailing `curl/8.7.1` — Percy's edge has blocked unrecognised agents before.
 
 ## Loop policy
 
@@ -70,6 +82,8 @@ Aggregate (v0.3 verdict tiers):
 
 **Case D — the build was already rejected by a human (check this FIRST):**
 
+*(PR-author flow only. In regression mode → Case R; when reviewing someone else's PR → Case V. Neither edits code.)*
+
 Before evaluating the plugin's own verdicts, look at the resolved build's `review-state` (from `/percy-review` Step 1). If it is `rejected` / `changes_requested` **and the plugin did not just reject it itself this invocation** — i.e. a *human* rejected it (directly in Percy, or after a Case B handoff where they reviewed a flagged comparison and decided it's wrong) — then the decision is already made. **Do not re-derive a verdict to decide whether to reject; go straight to the iterate-on-fix loop.**
 
 - Run `/percy-review` only to gather *what changed and why* (Percy's per-region `change_description` / `visual_quality_reason` for the build's changed comparisons) — not to re-decide.
@@ -80,26 +94,91 @@ This is the key path that makes iteration fire on **any** reject — the plugin'
 
 **Case R — regression run (no PR): triage, don't iterate.**
 
-If `/percy-review` ran in **regression mode** (default-branch / non-PR / scheduled run — intent = the **accumulated `## Percy Visual Intent` of PRs merged since the last approved baseline**, or empty if nothing merged), the gate's job changes: there is no PR diff to fix, so the **iterate loop does not apply**. Instead, triage:
+If `/percy-review` ran in **regression mode** (regression branch / non-PR / scheduled run — intent = what was **merged in the app repos since the last approved baseline**, per review Step 7.4), the gate's job changes: there is no PR diff to fix, so the **iterate loop does not apply** and **no code is edited**. Instead, triage into four buckets (review Step 8's regression rules decide which):
 
-- **Everything expected or noise** → changes either match a merged PR's intent or are dynamic/flaky. Summarize with attribution ("7 changes: 4 match merged intents ([PR #123](url), [PR #124](url)), 3 recurring dynamic surfaces") and recommend **approve**; one confirm clears the whole run. This is the QA time-saver: what used to be snapshot-by-snapshot eyeballing becomes one line.
-- **Genuine anomalies (`likely-bug`)** → these came from *outside* this repo (a deploy, backend/data change, environment drift). Surface each with Percy's reasoning + the snapshot deep-link, recommend flagging (one confirm), and hand off for investigation — e.g. "correlate with what shipped since the last approved run." Do **not** prompt a code-fix iteration; there's nothing in this working tree to edit. If the run is anomalies-only, a build-level **reject** is fine — but know it's **terminal**: a rejected build refuses every further review action (`409 "Can only review non-rejected builds"`, including `unapprove`), so once rejected there is no partial approval later. If any snapshot might still need approving, use `request_changes` instead.
-- **Mixed** → **don't reject the whole build** — that would hold the baseline hostage to a handful of anomalies. Use **snapshot-scoped reviews**: the `/reviews` endpoint accepts a `snapshots` relationship alongside the build:
+| Bucket | What's in it | Action |
+|---|---|---|
+| ✅ **Explained** | `expected` — matches a merged PR (cite PR#; mark weak-intent matches) | Approve (snapshot-scoped), one confirm for the batch |
+| 🔁 **Noise** | `expected` (noise) / `likely-flaky-test` — dynamic content, rendering variation, flaky capture per history | Approve with the explained batch — list them separately so the user sees what's noise |
+| ⚠️ **Unexplained** | `unplanned-change` — Percy says valid, but nothing merged explains it (possible deploy, rollback, config or data change) | **Do not approve.** Flag via `request_changes`, then report (Step R2) |
+| 🛑 **Anomaly** | `likely-bug` — Percy flagged a defect that nothing merged explains, or an explained surface that changed in a broken-looking way | Flag via `request_changes`, then report (Step R2) |
+| 🙋 **Needs your eyes** | `needs-human` | Leave unreviewed; show Percy's reasoning verbatim + deep link |
+
+**Percy's own bug flags stay the primary defect signal**: merged-PR context only *explains* a change — it never clears an `irregularity` on its own.
+
+**Step R0 — carry forward last run's open flags (do this before triaging).** ⚠️ Verified live: when a snapshot was flagged `changes_requested` and the problem is **not** fixed, the next run captures the same pixels, diffs **0** against the flagged capture, and Percy marks it **`approved` / `no_diffs` automatically** — the anomaly silently becomes baseline and never shows up as a diff again. So the gate must remember:
+1. Find the previous regression build(s) on this branch since the last fully-approved one (`GET /builds?filter[branch]=<branch>`), and collect snapshots whose `review-state` was `changes_requested`.
+2. For each, look at the same-named snapshot in this build:
+   - **diff 0 / `no_diffs`** → **🔁 Still unresolved** — the flagged state is still live (Percy auto-approved it only because nothing changed). Never count it as clean.
+   - **a diff that restores the pre-flag look** ("prices visible again", "teal is back") → **✅ Fixed** — approve it with the Explained batch and close/comment on its ticket.
+   - **a different new diff** → triage it normally.
+3. Show **Still unresolved** as its own bucket at the top of the summary, with the ticket from the earlier run, and offer to comment on that ticket (*"still present in nightly #10"*) rather than filing a new one. Percy's own `approved` state on these snapshots doesn't change that; say so plainly.
+
+Present the triage as one summary (counts per bucket, then one line per cluster with snapshot names, browsers/widths, the cited PR# or Percy's reasoning, and a deep link), then ask in this order:
+
+1. **Approve the Explained + Noise snapshots?** — `action: "approve"` + the `snapshots` relationship (one confirm, listing them with their matched PR#s). Scoping is respected: exactly those snapshots flip to `approved`, so the baseline advances for those surfaces. If *everything* is Explained/Noise, this is the whole job — the QA time-saver: snapshot-by-snapshot eyeballing becomes one line.
+2. **Flag the Unexplained + Anomaly snapshots?** — `action: "request_changes"` + the `snapshots` relationship (one confirm, with Percy's reasoning + deep links). Scoping is respected: the flagged snapshots go `changes_requested`, the build becomes `changes_requested (changes_requested_snapshot)`, and the approvals from (1) stick.
+3. **Report them?** — Step R2.
+
+The `/reviews` relationship shape:
   ```json
   "relationships": {
     "build": { "data": { "type": "builds", "id": "<build_id>" } },
     "snapshots": { "data": [{ "type": "snapshots", "id": "<snapshot_id>" }, ...] }
   }
   ```
-  Two actions:
-  1. **Approve** the explained + noise snapshots — `action: "approve"` + the `snapshots` relationship (one confirm, listing them with their matched PR#s). Scoping is respected: exactly those snapshots flip to `approved`.
-  2. **Flag** the anomaly snapshots with **`action: "request_changes"`** + the `snapshots` relationship (one confirm, with Percy's reasoning + deep-links) — then hand those to QA for investigation as above. Scoping is respected: the flagged snapshots go `changes_requested`, the build becomes `changes_requested (changes_requested_snapshot)`, and the earlier approvals stick.
 
-  ⚠️ **Never send `action: "reject"` with a `snapshots` relationship.** Verified live: reject **ignores the snapshot scope entirely** — it rejects the whole build (the response even lists every snapshot id), wipes any per-snapshot approvals already made, and leaves the build in the terminal rejected state above. Per-snapshot "reject" in Percy is `request_changes`.
+⚠️ **Never send `action: "reject"` with a `snapshots` relationship.** Verified live: reject **ignores the snapshot scope entirely** — it rejects the whole build, wipes any per-snapshot approvals already made, and leaves the build terminally locked (`409 "Can only review non-rejected builds"` on every further action, including `unapprove`). Per-snapshot "reject" in Percy is `request_changes`. A build-level `reject` is only acceptable when the run is anomalies-only **and** the user explicitly wants the whole build rejected.
 
-  **Baseline mechanics:** a `changes_requested` build still becomes the next build's base build. The approved snapshots' surfaces are baseline now (next run diffs them at 0.0), and the flagged snapshot diffs against its *flagged* capture — so after the external fix lands, the next morning shows a "fix restored parity" diff on exactly that snapshot; approve it and the run is clean. This is what "approve the explained snapshots so the baseline advances" buys.
+**Baseline mechanics:** a `changes_requested` build still becomes the next build's base build. The approved snapshots' surfaces are baseline now (next run diffs them at 0.0), and the flagged snapshot diffs against its *flagged* capture — so after the external fix lands, the next morning shows a "fix restored parity" diff on exactly that snapshot; approve it and the run is clean. **If the fix has NOT landed, the flagged snapshot diffs 0 and Percy auto-approves it (`no_diffs`)** — which is why Step R0 carries open flags forward.
 
-Loop caps don't apply (no loop). Everything else — human confirm before approve/reject, verbatim Percy reasoning, deep links — unchanged.
+Anomalies came from *outside* this repo (a deploy, rollback, backend/data change, environment drift) — hand them off for investigation ("correlate with what shipped since the last approved run"); never start a code-fix loop in a regression-suite repo.
+
+**Step R2 — Report flagged snapshots (learn the team's route once, confirm every time).**
+
+Reporting goes wherever *this team* reports bugs. Don't assume Jira or GitHub.
+
+*Saved route?* Read `reporting:` from `.percy/config.local.yml` (per person, wins if present) or `.percy/config.yml` (team-wide). If present, propose it as the default — *"File 2 issues in Jira WEB like last time (one per anomaly, label `visual-regression`)? [Enter] / change / skip"* — and act only on a yes.
+
+*No saved route (first run)?* **Discover, then ask** — never a blank question:
+1. Look for signals: Jira keys in recent app-PR titles/branches (`gh pr list -R <app_repo> --state merged --limit 30 --json title,headRefName` → `[A-Z][A-Z0-9]+-\d+`); an Atlassian/Jira tool available to you (MCP) or a `jira` CLI on PATH; GitHub issues labeled `bug`/`regression`/`visual` in the app repos; issue templates (`.github/ISSUE_TEMPLATE/`).
+2. Propose the likely route with what you found, then ask how the team does it:
+   - **New ticket per anomaly**
+   - **One ticket for the whole run** (anomalies as a checklist)
+   - **Comment on the existing ticket of the suspected PR** (the Jira key or issue linked from the PR merged in the window)
+   - **GitHub issue in the app repo**
+   - **Something else** (Slack channel, internal tracker) → you draft the text for the user to paste
+   - **Don't report**
+3. Ask only the details that route needs (project key, issue type, labels, component; never assignee unless they name one). **For Jira, read the project's create metadata first** (issue types + required fields — via your Jira tool, or `GET /rest/api/3/issue/createmeta/<project>/issuetypes/<typeId>`) and offer the real options: enterprise projects often **don't have the type you'd guess** (e.g. no `Task`) and **require custom fields** (e.g. *Source*, *Work category*) that make a create fail with 400 until set. Ask for each required field once, using its allowed values, and save the choices so later runs file in one step.
+4. **Ask where to save it**, recommending the repo: *"Save this in `.percy/config.yml` so the whole QA team files the same way (recommended — reporting is a team convention), or just for you in `.percy/config.local.yml`?"* Write:
+   ```yaml
+   reporting:
+     route: jira-new | jira-run | jira-comment-pr | github-issue | draft | none
+     jira:                                                                    # jira-* routes
+       project: WEB
+       issue_type: Bug
+       labels: [visual-regression]
+       required_fields: { customfield_10104: { id: "10545" } }               # saved answers for required custom fields
+     github: { repo: owner/app, labels: [visual-regression] }              # github-issue
+     saved_by_choice: repo | local
+   ```
+   `.percy/config.local.yml` must be gitignored — add it if missing. Never store tokens here.
+
+*Filing (after the yes):*
+- **Content per anomaly:** title `Visual regression: <snapshot> — <Percy change_title>`; body with snapshot, browsers/widths, Percy's `change_description` + `change_reason` quoted, the snapshot deep link, the build link, suspected PR(s) from the window (or "nothing merged explains it — possible deploy/rollback"), and the regression branch + build number.
+- **Jira:** use the Atlassian/Jira tool you have (MCP), else the `jira` CLI; if neither is available, fall back to drafting the ticket text and say why.
+- **GitHub:** `gh issue create -R <repo> --title … --body-file … --label …`.
+- **Don't duplicate:** before filing, look for an open ticket for this snapshot + regression branch; if one exists, add a comment with the new build instead of a new ticket. Jira: JQL on the saved project/labels plus a summary match. GitHub: **list, don't search** — `gh issue list -R <repo> --label <label> --state open --json number,title` and match titles locally; `gh issue list --search` goes through GitHub's search index, which lags just-created issues (verified: a same-minute search missed the issue just filed).
+- Print every created/updated ticket as a link.
+
+Loop caps don't apply (no loop). Everything else — human confirm before every approve / flag / report, verbatim Percy reasoning, deep links — unchanged.
+
+**Case V — reviewing someone else's PR build (reviewer mode).**
+
+When the user is **reviewing**, not authoring — the PR's author isn't the current user (`gh pr view <n> --json author` vs `gh api user -q .login`), the user says "review PR #123's Percy build", or the repo is `repo_role: regression-suite` and the PR is in an app repo — the gate must not offer to edit code. Run `/percy-review` against that PR's build (intent = the PR's `## Percy Visual Intent`, else its title/body + diff via `gh pr diff`), then:
+- **Clean** (Case A conditions) → *"Approve the Percy build? (y/n)"* → `action: "approve"`.
+- **Anything to fix** (likely-bug / unplanned / needs-human) → *"Request changes on the Percy snapshots and leave a PR comment? (y/n)"* → snapshot-scoped `request_changes` + `gh pr review <n> -R <repo> --comment --body-file …` summarising each finding with Percy's reasoning and deep links. **No fix loop, no commits** — the author fixes; the reviewer's job ends at the verdict.
+- When the author pushes a fix, the next `/percy-gate` on that PR re-reviews the new build the same way.
 
 **Case A — clean (zero likely-bugs, zero unplanned-changes, zero needs-human, zero flaky-tests, zero asset-capture-issues):**
 
@@ -190,7 +269,7 @@ Both actions hit the same Percy reviews endpoint, with different `action` values
 ```
 POST /api/v1/reviews
 Authorization: Basic <base64(PERCY_USERNAME:PERCY_ACCESS_KEY)>
-User-Agent: curl/8.7.1
+User-Agent: $PERCY_PLUGIN_UA
 Content-Type: application/vnd.api+json
 
 {
@@ -211,7 +290,7 @@ Content-Type: application/vnd.api+json
 ```
 POST /api/v1/reviews
 Authorization: Basic <base64(PERCY_USERNAME:PERCY_ACCESS_KEY)>
-User-Agent: curl/8.7.1
+User-Agent: $PERCY_PLUGIN_UA
 Content-Type: application/vnd.api+json
 
 {

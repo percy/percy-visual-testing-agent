@@ -6,7 +6,7 @@ argument-hint: "[blank for current branch, or PR number/URL]"
 
 # Percy Visual Intent
 
-Writes a `## Percy Visual Intent` section into the PR description (or `.percy/intent-<branch>.md` if no PR exists). This is the ground-truth signal `/percy:review` uses to decide whether each Percy diff is an *expected* change or a real issue.
+Writes a `## Percy Visual Intent` section into the PR description (or `.percy/intent-<branch>.md` if no PR exists). This is the ground-truth signal `/percy-review` uses to decide whether each Percy diff is an *expected* change or a real issue.
 
 ## Operating principle: propose, don't ask
 
@@ -28,7 +28,7 @@ Pull from these sources, in order of priority:
 1. **Current conversation context** — what the user asked for, what the agent committed to changing. This is the primary signal.
 2. **Git diff** — `git diff origin/main...HEAD --stat` for the file list, then `git diff origin/main...HEAD` on UI files (`*.tsx`, `*.jsx`, `*.vue`, `*.svelte`, `*.css`, `*.scss`, `*.html`) — **to ground the DETAILS of what the conversation says (exact colors, selectors, routes), never to expand the intent's scope.**
 
-   > **Scope rule — intent is what was MEANT, not what the diff contains.** If the diff includes a change nobody asked for or mentioned in the session, do **NOT** add it to "Intended visual changes" — and don't interrogate the user about it either. Leaving it out is the design: `/percy:review` exists precisely to catch out-of-intent changes (`unplanned-change` / `likely-bug`). An intent doc that absorbs every diff hunk would launder unintended changes — including bugs — into "intended" and blind the review. (Exception: the mid-stream **backfill** case, where no session context exists at all — there the diff is the only source and the draft carries lower fidelity by nature.)
+   > **Scope rule — intent is what was MEANT, not what the diff contains.** If the diff includes a change nobody asked for or mentioned in the session, do **NOT** add it to "Intended visual changes" — and don't interrogate the user about it either. Leaving it out is the design: `/percy-review` exists precisely to catch out-of-intent changes (`unplanned-change` / `likely-bug`). An intent doc that absorbs every diff hunk would launder unintended changes — including bugs — into "intended" and blind the review. (Exception: the mid-stream **backfill** case, where no session context exists at all — there the diff is the only source and the draft carries lower fidelity by nature.)
 3. **PR description (existing)** — if a PR is already open, parse its description for non-visual context.
 
 ### 2. Build the section
@@ -91,17 +91,17 @@ Do NOT push the section without explicit yes. Do NOT ask the user to type the in
 
 ### 5. Auto-watch by default
 
-After the intent is injected into a PR, **start `/percy:watch` automatically** — don't make the user opt in. This is the frictionless default: open PR → intent written → watcher armed → gate fires itself when the Percy build lands. Announce it in one line (visible + cancellable) instead of asking:
+After the intent is injected into a PR, **start `/percy-watch` automatically** — don't make the user opt in. This is the frictionless default: open PR → intent written → watcher armed → gate fires itself when the Percy build lands. Announce it in one line (visible + cancellable) instead of asking:
 
 > Intent written to [PR #<n>](<pr_url>). 👀 Watching the Percy build for this branch — I'll run the gate automatically when it finishes. (Say "stop watching" to cancel.)
 
-- Invoke `/percy:watch` via the Skill tool, passing the current branch / PR number. The watcher tracks **only the Percy check/build** — it never waits on or blocks the repo's other CI checks (see `/percy:watch` Path B) — and auto-invokes `/percy:gate` on completion. The user keeps working.
+- Invoke `/percy-watch` via the Skill tool, passing the current branch / PR number. The watcher tracks **only the Percy check/build** — it never waits on or blocks the repo's other CI checks (see `/percy-watch` Path B) — and auto-invokes `/percy-gate` on completion. The user keeps working.
 - Only fall back to *asking* when backgrounding isn't available in the host IDE (an inline watch would block the session — that deserves consent).
 
 Skip the watch if no PR exists yet (Step 3's "no PR" branch). The watcher needs a real build to watch.
 
 ## Important
 
-- This section is **machine-read** by `/percy:review`. Keep formatting consistent.
+- This section is **machine-read** by `/percy-review`. Keep formatting consistent.
 - Do not include screenshots or links to Figma here — the section is for *what should change*, not *how it looks*.
 - Refresh the section every time the agent makes a UI commit, not just on PR creation. The `<!-- percy-visual-intent: ... -->` marker comments make in-place replacement safe.

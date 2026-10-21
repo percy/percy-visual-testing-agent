@@ -6,9 +6,9 @@ argument-hint: "[optional: project name, e.g. 'checkout-web']"
 
 # Percy Integrate
 
-The "day-0" onboarding skill (the Visual Test Integration Agent's initial-setup workflow). Takes a project that has a working functional test suite but **no Percy** and wires in visual testing end-to-end. After this, the review-loop skills (`/percy:visual-intent`, `/percy:review`, `/percy:gate`) have snapshots to work with.
+The "day-0" onboarding skill (the Visual Test Integration Agent's initial-setup workflow). Takes a project that has a working functional test suite but **no Percy** and wires in visual testing end-to-end. After this, the review-loop skills (`/percy-visual-intent`, `/percy-review`, `/percy-gate`) have snapshots to work with.
 
-For a project that **already** has Percy and just needs more coverage on a specific file, use `/percy:expand-coverage` instead.
+For a project that **already** has Percy and just needs more coverage on a specific file, use `/percy-expand-coverage` instead.
 
 ## Eligibility (check first, stop if not met)
 
@@ -18,7 +18,7 @@ For a project that **already** has Percy and just needs more coverage on a speci
 | An **existing, functional test suite** runs (Playwright/Cypress/WDIO/Selenium/Puppeteer/Storybook, etc.) | ✅ |
 | Percy **not already integrated** | ✅ — no `@percy/*` in deps and no `percySnapshot(` calls in the suite |
 
-If Percy is already wired in → don't re-integrate. Point the user to `/percy:expand-coverage <test file>` to grow coverage. If there's no functional test suite at all, say so — this skill adds visual checkpoints to *existing* tests; it does not author a test suite from scratch.
+If Percy is already wired in → don't re-integrate. Point the user to `/percy-expand-coverage <test file>` to grow coverage. If there's no functional test suite at all, say so — this skill adds visual checkpoints to *existing* tests; it does not author a test suite from scratch.
 
 ## Steps
 
@@ -51,12 +51,12 @@ Swap the binding package + package-manager per Step 1. Don't install if the dep 
 
 ### 3. Ensure the Percy token
 
-`percySnapshot()` calls are no-ops at runtime unless `percy exec` wraps the run with a valid `PERCY_TOKEN` — follow `/percy:setup` Step 1's credential flow for this (it covers account creation, project creation, and safe persistence to a gitignored secrets file); never suggest a shell-profile `export`, and never ask the user to paste a token into the chat.
+`percySnapshot()` calls are no-ops at runtime unless `percy exec` wraps the run with a valid `PERCY_TOKEN` — follow `/percy-setup` Step 1's credential flow for this (it covers account creation, project creation, and safe persistence to a gitignored secrets file); never suggest a shell-profile `export`, and never ask the user to paste a token into the chat.
 
 ### 4. Write config
 
 - If there's no `.percy.yml` / `percy.config.js`, create a minimal one (snapshot widths, optional discovery settings). Keep defaults unless the project signals otherwise.
-- Run `/percy:setup` (or replicate it) to write `.percy/config.yml` so the review-loop skills can read project state.
+- Run `/percy-setup` (or replicate it) to write `.percy/config.yml` so the review-loop skills can read project state.
 
 ### 4b. Make the Percy commands available in the user's IDE (GitHub Copilot)
 
@@ -87,7 +87,7 @@ PERCY_TOKEN=<token> percy exec -- <the project's test command>
 ```
 **Run the first build from the repo's default branch** (or confirm the Percy project's default base branch matches the branch you're on) — otherwise the first PR build has no baseline to diff against, and the whole first review is a confusing no-op.
 
-Then `/percy:review` to confirm the snapshots came through. Hand off — don't poll here.
+Then `/percy-review` to confirm the snapshots came through. Hand off — don't poll here.
 
 ### 6b. Wire Percy into CI (the hands-off step)
 
@@ -100,23 +100,23 @@ The first build was local; day-to-day Percy should run in CI on every PR. Offer 
    - Commit the workflow change on the current branch; on the next push, **verify the Percy check appears** on the PR (`gh pr checks`).
 3. **Other CIs**: propose the equivalent config snippet and point at the provider's secret store (no programmatic set) — link Percy's CI/CD docs (browserstack.com/docs/percy/ci-cd/overview).
 
-With this in place: push → CI runs Percy → `/percy:watch` sees the check → gate fires. No `/percy:run-build` needed again.
+With this in place: push → CI runs Percy → `/percy-watch` sees the check → gate fires. No `/percy-run-build` needed again.
 
-### 7. Finish with `/percy:setup`
+### 7. Finish with `/percy-setup`
 
-Integration is not complete until setup finishes: credentials (including Step 1c's BrowserStack user creds for approve/reject), AI-tier detection, baseline state, and the workflow hook all live there. **Re-invoke `/percy:setup` now** — it picks up the freshly integrated project and closes the loop.
+Integration is not complete until setup finishes: credentials (including Step 1c's BrowserStack user creds for approve/reject), AI-tier detection, baseline state, and the workflow hook all live there. **Re-invoke `/percy-setup` now** — it picks up the freshly integrated project and closes the loop.
 
 ## Output
 
 Summarize what changed:
-> Integrated Percy (Playwright) — installed `@percy/cli @percy/playwright`, wrote `.percy.yml`, added 3 `percySnapshot()` calls across 3 tests. Run `percy exec -- npx playwright test` to capture the first build, then finish with `/percy:setup`.
+> Integrated Percy (Playwright) — installed `@percy/cli @percy/playwright`, wrote `.percy.yml`, added 3 `percySnapshot()` calls across 3 tests. Run `percy exec -- npx playwright test` to capture the first build, then finish with `/percy-setup`.
 
 If a step couldn't complete (e.g. token missing, ambiguous framework), surface the actual blocker — don't report success.
 
 ## Important
 
 - **Web only.** If the project is App Automate / mobile / Percy-on-Automate, stop and explain that this agent supports Percy Web; point to standard setup docs.
-- **Don't author tests.** This skill adds visual checkpoints to *existing* functional tests. If coverage is thin, that's `/percy:expand-coverage`'s job per file.
+- **Don't author tests.** This skill adds visual checkpoints to *existing* functional tests. If coverage is thin, that's `/percy-expand-coverage`'s job per file.
 - **Confirm before editing code.** Always propose the snapshot insertions and get approval before writing to test files.
 - **Cross-IDE.** Prefer `percy-cli` + the project's test command; use BrowserStack MCP only when it's available (token fetch, install helpers) behind an "if MCP available" branch.
 - **Don't invent SDK signatures.** When unsure of a binding's exact call, check the Percy docs for that SDK rather than guessing.

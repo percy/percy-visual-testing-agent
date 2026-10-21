@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Integrate Percy into a project that already has a functional test suite but no visual testing yet. Detects the language + test framework, installs the matching BrowserStack Percy SDK + @percy/cli, wires config, inserts the first percySnapshot() calls (with your approval), and suggests a first build. Run this once per project to go from zero to visual coverage."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-integrate/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->

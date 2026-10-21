@@ -6,7 +6,7 @@
 //   - prompts/<name>.prompt.md      → Copilot prompt files (invoked as /<name> in Copilot Chat)
 //   - copilot-instructions.md       → thin repo-instructions pointer (AGENTS.md stays canonical)
 //
-// These are the distributable bundle. /percy:integrate copies them into a user
+// These are the distributable bundle. /percy-integrate copies them into a user
 // repo's .github/ when the user is on Copilot. The skills themselves (SKILL.md +
 // AGENTS.md) are untouched, so Claude / Cursor / Codex / Antigravity keep full capability.
 //
@@ -45,7 +45,7 @@ function parseSkill(src) {
   return { fm, body: m[2].trim() };
 }
 
-/** Rewrite cross-references: Copilot invokes prompts as /percy-review (hyphen), not /percy:review. */
+/** Safety net: older skill text used /percy:<skill>, which no agent resolves. Claude Code and Copilot both accept /percy-<skill>. */
 function rewriteRefs(text) {
   return text.replace(/\/percy:([a-z-]+)/g, '/percy-$1');
 }
@@ -54,8 +54,10 @@ function promptFile({ name, fm, body, relSkill }) {
   const argLine = fm['argument-hint']
     ? `\n> **Argument:** ${fm['argument-hint']}`
     : '';
+  // VS Code prompt-file frontmatter: `agent` (ask | agent | plan | <custom agent>) replaced the
+  // older `mode` field — https://code.visualstudio.com/docs/copilot/customization/prompt-files
   return `---
-mode: agent
+agent: agent
 description: "${rewriteRefs(fm.description || '').replace(/"/g, '\\"')}"
 ---
 ${GEN_NOTE(relSkill)}
@@ -90,6 +92,9 @@ ${rows}
 
 Typical order: \`/percy-setup\` → \`/percy-integrate\` or \`/percy-expand-coverage\` →
 \`/percy-visual-intent\` → \`/percy-review\` → \`/percy-gate\`.
+
+QA / regression-suite repos: \`/percy-setup\` once (it records the regression branch and
+app repos), then \`/percy-gate\` each morning to triage the latest regression run.
 
 > Copilot CLI does not support prompt files — CLI users still get the \`AGENTS.md\`
 > behavior, but invoke the workflow by describing it rather than via \`/percy-*\`.

@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Migrate a project's existing visual testing to Percy. Handles two families: (A) Applitools Eyes — maps eyes.open/check/close, coded regions, and applitools.config.js to percySnapshot(), Percy regions, and .percy.yml; (B) in-house screenshot assertions — Playwright toHaveScreenshot(), cypress-image-snapshot, jest-image-snapshot, WDIO visual service — replacing local golden-file baselines with Percy's server-side baselines. Proposes a full mapping before touching code, and is honest about what has no Percy equivalent."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-migrate/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->

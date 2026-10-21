@@ -9,11 +9,11 @@ argument-hint: "[optional: test command to wrap, e.g. 'npx playwright test']"
 Kicks a Percy build for the current working copy. Most projects already run Percy in CI on PR — only use this skill when:
 - You're iterating locally and want a Percy build *before* pushing.
 - The repo has no CI integration for Percy.
-- You're rerunning after a fix during a `/percy:gate` iteration.
+- You're rerunning after a fix during a `/percy-gate` iteration.
 
 ## Prerequisites
 
-- `.percy/config.yml` exists (run `/percy:setup` first).
+- `.percy/config.yml` exists (run `/percy-setup` first).
 - `PERCY_TOKEN` is available — pull it from the project record, or instruct the user to set it.
 - A Percy CLI is installed (`npm install --save-dev @percy/cli`) OR the BrowserStack MCP server is available.
 
@@ -73,21 +73,21 @@ Agent shells inside Electron-based IDEs (VS Code, Claude Code desktop, Cursor) a
 
 ### 3. Capture the build ID
 
-Parse the build URL from CLI output (`https://percy.io/<org>/<project>/builds/<id>`). Save the build ID — `/percy:review` will need it.
+Parse the build URL from CLI output (`https://percy.io/<org>/<project>/builds/<id>`). Save the build ID — `/percy-review` will need it.
 
 ### 4. Hand off
 
 Print:
-> Percy build <id> started: [build #<id> ↗](<url>). Run `/percy:review` to poll and classify when it finishes.
+> Percy build <id> started: [build #<id> ↗](<url>). Run `/percy-review` to poll and classify when it finishes.
 
 **Cold-start note:** if `.percy/config.yml` has `has_approved_baseline: false` (or this is the first build on the branch), add:
 > 🟢 This is the baseline build — there's no prior build to diff against, so expect no visual diffs or AI verdict. Approve it in Percy to lock the baseline; the *next* build gets real classification.
 
-That way the user isn't surprised when `/percy:review` reports "no AI" on a build that had nothing to compare against.
+That way the user isn't surprised when `/percy-review` reports "no AI" on a build that had nothing to compare against.
 
-Do not poll inside this skill — that's `/percy:review`'s job. Returning quickly lets the user kick a build and continue working.
+Do not poll inside this skill — that's `/percy-review`'s job. Returning quickly lets the user kick a build and continue working.
 
 ## Important
 
-- Don't run this inside `/percy:gate`'s iteration loop blindly — let `/percy:gate` decide when to re-build. Iterating fast burns Percy snapshots quickly.
+- Don't run this inside `/percy-gate`'s iteration loop blindly — let `/percy-gate` decide when to re-build. Iterating fast burns Percy snapshots quickly.
 - If the project already has CI on PR push, *don't* run this skill — push the branch and let CI kick the build instead.

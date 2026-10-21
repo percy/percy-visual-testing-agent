@@ -8,7 +8,7 @@ argument-hint: "[optional: build ID; defaults to latest build on current branch]
 
 The core review loop. Polls a Percy build, gathers all Percy's AI signal (per-region change titles + descriptions + `change_reason` + `visual_quality`, cluster narratives, per-comparison bug flags), enriches it with the developer's code context (git diff, PR body, commit messages, conversation), and asks the agent to reason — **per comparison** — whether each diff matches stated intent.
 
-This skill **does not** approve or reject builds. It produces verdicts. `/percy:gate` consumes them.
+This skill **does not** approve or reject builds. It produces verdicts. `/percy-gate` consumes them.
 
 ## Design principle — Percy-AI-native
 
@@ -27,8 +27,20 @@ This skill therefore:
 
 ## Prerequisites
 
-- `.percy/config.yml` exists (run `/percy:setup`).
+- `.percy/config.yml` exists (run `/percy-setup`).
 - A Percy Visual Intent section exists in the current PR description, OR `.percy/intent-<branch>.md` exists, OR there is enough conversation context to reconstruct intent.
+
+## User-Agent (every Percy API call)
+
+Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
+
+```
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
+```
+
+- `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
+- `channel` / `install` — `install_channel` / `install_id` from `.percy/config.yml` (`unknown` / `none` if absent). `role` — `repo_role` from the same file (`app` if absent).
+- Never put names, emails, tokens, or repo names in it. Keep the trailing `curl/8.7.1` — Percy's edge has blocked unrecognised agents before.
 
 ## Endpoint cheat-sheet
 
@@ -42,7 +54,7 @@ GET /api/v1/snapshots?project_id=<id>&filter[name]=<n>&page[limit]=20  # snapsho
 GET /api/v1/network-logs?comparison_id=<id>                  # smart-debug / asset-capture (v0.2; needs user token)
 ```
 
-Most calls work with `Authorization: Token token="$PERCY_TOKEN"` and `User-Agent: curl/8.7.1` (Cloudflare blocks default UAs).
+Most calls work with `Authorization: Token token="$PERCY_TOKEN"` and `User-Agent: $PERCY_PLUGIN_UA` (see above).
 **Note:** `/network-logs` requires user-token auth (BrowserStack `PERCY_USERNAME` + `PERCY_ACCESS_KEY` via HTTP Basic), not the project `PERCY_TOKEN`. Same auth class used by `/reviews`.
 
 ## Steps
@@ -51,9 +63,11 @@ Most calls work with `Authorization: Token token="$PERCY_TOKEN"` and `User-Agent
 
 - If `$ARGUMENTS` is a build ID, use it.
 - **If `.percy/config.yml` says `repo_role: regression-suite`**, resolve the latest build from the configured **`regression_branch`** — NOT the current checkout's branch (a QA engineer's local checkout is often `main` or a feature branch while the scheduled runs build `pre_prod`).
+  - **Several regression branches** (`regression_branches: [pre_prod, master]` — one per environment is common): ask which run to triage, offering the latest build of each with its time ("pre_prod — 20:09 last night · master — 16:46"). Triage one at a time; each branch has its own baseline and its own window.
+  - **Match branch names with or without an `origin/` prefix.** CI often reports the branch as `origin/pre_prod`; if `filter[branch]=pre_prod` returns nothing, retry with `origin/pre_prod` (and vice versa).
 - Otherwise: `GET /builds?filter[branch]=<current branch>&page[limit]=1` and use the first result.
-- **Ambiguous non-PR build:** if the resolved build is a non-PR build on a non-default branch and no `regression_branch` is configured, ask — "is this your scheduled regression run?" — instead of falling into NO-INTENT mode. On yes, treat it as regression mode (Step 7.4) and suggest persisting the branch via `/percy:setup`.
-- If no build exists, stop and tell the user to push or run `/percy:run-build`.
+- **Ambiguous non-PR build:** if the resolved build is a non-PR build on a non-default branch and no `regression_branch` is configured, ask — "is this your scheduled regression run?" — instead of falling into NO-INTENT mode. On yes, treat it as regression mode (Step 7.4) and suggest persisting the branch via `/percy-setup`.
+- If no build exists, stop and tell the user to push or run `/percy-run-build`.
 
 ### 2. Poll until done
 
@@ -74,7 +88,8 @@ Read from `attributes.ai-details`:
 | Signal | Value | What it means |
 |---|---|---|
 | `total-comparisons-with-ai > 0` | ✅ | AI processed this build — proceed |
-| `total-comparisons-with-ai === 0` AND `summary-status === "skipped"` AND `summary-reason === "no_ai_changes"` | OK | Build had no AI changes (e.g., identical to baseline) — likely PASS |
+| `total-comparisons-with-ai === 0` AND `summary-status === "skipped"` AND `summary-reason === "no_ai_changes"` AND **`total-comparisons-diff === 0`** | OK | Nothing changed — PASS |
+| `total-comparisons-with-ai === 0` AND `summary-reason === "no_ai_changes"` BUT **`total-comparisons-diff > 0`** | ⚠️ | **AI did not run — this is NOT a pass.** Verified on Percy-on-Automate projects without AI: real diffs, yet the summary still says `no_ai_changes`. Check cold start first, then go to NO-AI mode (surface every changed snapshot, no auto-approve). |
 | `total-comparisons-with-ai === 0` AND `summary-reason` is something else | ⚠️ | No AI coverage — first check **Cold start** (no approved baseline yet); if neither cold-start case matches, fall back to NO-AI mode |
 
 **Don't gate on `ai-details.ai-enabled`** — that's the auto-approve toggle, not "is AI available."
@@ -96,11 +111,17 @@ GET /api/v1/builds/<id>?include=build-summary
   }]
   ```
 - `summary-status === "skipped"` AND `summary-reason === "too_many_comparisons"`: no cluster summary. Skip Step 5's cluster promotion — treat every comparison independently.
-- `summary-status === "skipped"` AND `summary-reason === "no_ai_changes"`: build has no AI-detected changes; verdict = PASS.
+- `summary-status === "skipped"` AND `summary-reason === "no_ai_changes"`: PASS **only if `total-comparisons-diff === 0`**. With diffs present it means AI didn't process them — NO-AI mode (Step 3).
 
 ### 5. Fetch per-comparison region detail
 
-For every unique `comparison_id` referenced in clusters:
+**Cover the whole build, not just the clusters.** The cluster summary is a **digest of the top change groups, not an index of every change** — verified on a real nightly: 5 clusters named 50 comparisons while the build had 331 changed comparisons and 58 potential bugs. Reviewing only cluster-referenced comparisons silently skips most of a big build, bug flags included. So:
+
+- **Enumerate every changed comparison in one paged call:** `GET /api/v1/snapshots?build_id=<id>&include=comparisons&page[limit]=100`. The included `comparisons` carry `applied-regions`, `diff-ratio`, `ai-details`, `ai-processing-state` and `recurring-diff-detection-status` — no per-comparison GET needed for these. Browser names still need `GET /comparisons/<id>?include=browser.browser-family` (or the snapshot's `browsers` relationship), fetched once per distinct browser.
+- **⚠️ Paging: the snapshots endpoint returns at most 30 per page and gives NO `links.next`.** Page with `page[cursor]=<id of the last snapshot on the previous page>` until a page comes back with fewer than 30 (verified: 30 + 7 = the build's 37 snapshots). Then check the count against the build's `total-snapshots`; never trust a single page.
+- **Use clusters to group, not to filter.** Comparisons in a cluster share a verdict unit. Comparisons in **no** cluster are grouped **by snapshot** — the snapshot is what gets approved or flagged, and region titles vary per browser/width, so grouping by title fragments one change into hundreds of units (verified: 260 title-groups vs 37 snapshots on the same build). Within a snapshot, list its distinct changes (deduped `change_title`s, Percy-flagged ones first).
+
+For each changed comparison (from the enumeration above):
 
 ```
 GET /api/v1/comparisons/<id>?include=browser.browser-family
@@ -120,7 +141,9 @@ From the comparison response, collect:
   - `coordinates`
   - `ignored` (skip the region if `true`)
 - Browser family name from `included[].browser-families[].attributes.name`
-- Snapshot display-name — **don't fetch snapshots one at a time and don't hunt for a comparison→snapshot relationship key.** Before this step, prefetch the whole build's snapshots in ONE call — `GET /api/v1/snapshots?build_id=<id>&page[limit]=100` — and build a `snapshot_id → name` map. The cluster summary already carries each comparison's `snapshot_id`, so every name lookup after that is a local map hit. (Why the mapping exists at all: Percy's cluster/comparison payloads reference snapshots by id only; names live on the snapshot object — and names are what humans + deep-links need.) **Paginate past `page[limit]=100`** when the build has more snapshots — nightly regression suites routinely exceed 100; follow `links.next` until exhausted, or the map silently drops names.
+- Snapshot display-name — **don't fetch snapshots one at a time and don't hunt for a comparison→snapshot relationship key.** Before this step, prefetch the whole build's snapshots in ONE call — `GET /api/v1/snapshots?build_id=<id>&page[limit]=100` — and build a `snapshot_id → name` map. The cluster summary already carries each comparison's `snapshot_id`, so every name lookup after that is a local map hit. (Why the mapping exists at all: Percy's cluster/comparison payloads reference snapshots by id only; names live on the snapshot object — and names are what humans + deep-links need.) **Paginate** the snapshot list with `page[cursor]` as described above (30 per page, no `links.next`) — otherwise the map silently drops names on any build over 30 snapshots.
+
+**Big builds → work from a file, not the chat.** A nightly run is often hundreds of changed comparisons (e.g. ~40 snapshots × several browsers/widths ≈ 350 comparisons). Write the gathered per-comparison data (snapshot name, browser, width, cluster ids, each region's `change_title` / `change_reason` / `visual_quality`) to **`.percy/triage/<build_id>.json`** (gitignored — add `.percy/triage/` to `.gitignore` if missing) and reason over it **cluster by cluster**: comparisons in one cluster show the same change, so one verdict per cluster (checked against a few members) is the unit of work — never paste the full payload into the conversation. Re-use the file if the same build is triaged again.
 
 ### 6. Apply the ONE mechanical rule: cluster-level bug promotion
 
@@ -141,7 +164,7 @@ For each comparison the cluster-promotion or per-region rule flagged as a candid
 
 1. **Query snapshot history (project token only — no DB access).** There is no single-call "history by name" endpoint — `/snapshots` requires a `build_id` (a project-scoped `filter[name]` call returns `400 param is missing: build_id`). So assemble the history client-side, entirely with the project `PERCY_TOKEN`:
    1. List the project's recent builds on this branch: `GET /api/v1/builds?filter[branch]=<branch>&page[limit]=20`.
-   2. For each build, fetch its snapshots: `GET /api/v1/snapshots?build_id=<build_id>&page[limit]=100`, keeping those whose `name` / `display-name` matches the comparison's snapshot.
+   2. For each build, fetch its snapshots: `GET /api/v1/snapshots?build_id=<build_id>&page[limit]=100` (cursor-paged, 30 per page — see Step 5), keeping those whose `name` / `display-name` matches the comparison's snapshot.
    3. From each matched snapshot, read `diff-ratio`, `review-state`, `review-state-reason`, and `fingerprint` to build the per-build history.
 
    > **No database dependency.** The plugin runs entirely on the public REST API.
@@ -152,13 +175,14 @@ For each comparison the cluster-promotion or per-region rule flagged as a candid
    - **Pattern A — Recurring incomplete-render:** how many of the last N captures had high `diff-ratio` (>0.05) followed by an approval? If ≥ 30% → flaky-test signal.
    - **Pattern B — Fingerprint instability:** how many distinct snapshot fingerprints in the last N builds? If > 50% are unique (vs. clustering around 1-2 stable fingerprints) → flaky-test signal.
    - **Pattern C — Same diff seen before:** does the head fingerprint of this comparison match any prior build's *unreviewed* or *rejected* snapshots that were later resolved by re-running? If yes → flaky-test signal.
+   - **Percy's own repeat-diff detector:** comparisons carry `recurring-diff-detection-status`; when Percy has marked a diff as recurring, treat that as strong support for Pattern D below.
    - **Pattern D — Recurring approved change (dynamic content):** did this snapshot show a diff that was then **approved** in a clear majority (≥ ~60%) of the last N builds? A surface that changes and gets accepted nearly every build is **dynamic content** (carousel/feed/timestamp/rotating asset), not a regression — even when the current capture's `change_reason` reads "broken" (a half-loaded carousel frame looks like a defect but recurs every build). Threshold is tunable.
 
 3. **If a pattern hits**, downgrade and **always surface for the user — never auto-approve and never auto-reject**:
    - **Flaky (Patterns A–C):** verdict `likely-flaky-test` — *"This snapshot was [blank / incomplete / spinner-rendered] in [8 of last 20] builds. Likely a wait-condition issue in the test, not a bug. Recommend fixing the test's page-load wait."*
    - **Dynamic content (Pattern D):** verdict `likely-flaky-test` with a dynamic-content reason — *"This surface changed and was approved in [N of last 20] builds — looks like dynamic content (e.g. a rotating carousel/feed), not a regression. Likely safe to approve/ignore — confirm?"*
 
-   In both cases: surface the dashboard deep-link, attach the recommendation, and **ask the user to confirm before anything is approved** (this tier is excluded from `/percy:gate` auto-approve). If this is the *only* change in the build, still surface it for the user to approve — do not silently pass it. Skip Step 8's intent reconciliation for this comparison.
+   In both cases: surface the dashboard deep-link, attach the recommendation, and **ask the user to confirm before anything is approved** (this tier is excluded from `/percy-gate` auto-approve). If this is the *only* change in the build, still surface it for the user to approve — do not silently pass it. Skip Step 8's intent reconciliation for this comparison.
 
    > **Worked example (illustrative).** A PR's intent is inert reliability work ("add font load retry"); Percy flags bottom-carousel thumbnails as spinner/placeholder "irregularities," and the change didn't match the inert reliability intent — so without history the plugin flags it as a likely-bug (correct, given only intent + code). But the snapshot history shows those carousel thumbnails change-and-get-approved in most recent builds → **dynamic content** (Pattern D). With history in the loop the right output is `likely-flaky-test` (dynamic) surfaced for a one-click approve — not a bug. This class of case cannot be resolved without history — which is why this pre-check matters.
 
@@ -170,18 +194,20 @@ Priority:
 1. **PR description** — `gh pr view --json body`, extract content between `<!-- percy-visual-intent: ... -->` markers.
 2. **Local intent file** — `.percy/intent-<branch>.md`.
 3. **Conversation context** — reconstruct from current session (only if it covers the changes in the build).
-4. **Regression mode — accumulated intent from merged PRs.** A build is a **regression run** when it's on the configured **`regression_branch`** from `.percy/config.yml` (set by `/percy:setup` — often a dedicated branch like `pre_prod` or `qa`, NOT the default branch), or it's non-PR-linked on the default branch, or the user says so. The expectation is NOT simply "nothing changed": PRs merged since the last approved baseline *legitimately* changed the UI, and the test suite may have been updated to match. Build the intent like this:
+4. **Regression mode — accumulated intent from merged PRs.** A build is a **regression run** when it's on the configured **`regression_branch`** from `.percy/config.yml` (set by `/percy-setup` — often a dedicated branch like `pre_prod` or `qa`, NOT the default branch), or it's non-PR-linked on the default branch, or the user says so. The expectation is NOT simply "nothing changed": PRs merged since the last approved baseline *legitimately* changed the UI, and the test suite may have been updated to match. Build the intent like this:
    1. **Find the last approved build on the regression branch** (walk `GET /builds?filter[branch]=<regression_branch>` for the most recent `review-state: approved`) — keep both its commit SHA and its **`finished-at` timestamp**.
    2. **List the PRs merged in the gap.**
       - **Same repo** (app + suite live together): a SHA range works — `git log <last>..<head> --merges` / `gh pr list --state merged --base <regression_branch>`.
       - **Cross-repo — `app_repos` configured in `.percy/config.yml`: harvest with a TIME WINDOW, not a SHA range.** QA-repo SHAs don't exist in the app repos, so a SHA range is meaningless there. Window = last approved regression build's `finished-at` → this build's `created-at`. Per app repo: `gh pr list -R <owner/name> --state merged --search "merged:<window-start>..<window-end>"`.
+      - **Also pull each merged PR's changed files** — `gh pr view <n> -R <owner/name> --json files,title,body` (add the diff for style/template/component files: `gh pr diff <n> -R <owner/name>`). This is regression mode's **code context**: it says which surfaces the merged work could have touched, and it works even when no PR carries an intent section. A PR that only touched `.npmrc`, CI config or backend code cannot explain a button recolor.
    3. **Harvest each one's `## Percy Visual Intent` — following the promotion hop if needed.** On many teams the regression branch receives **bot-created merge PRs** (e.g. "Merge feat/xyz — by automation") whose bodies carry no intent; the intent lives on the **original feature PR**. Resolve it: merge PR → source branch name → `gh pr list --head <branch> --state merged` → that PR's `## Percy Visual Intent` section. The **union** of the harvested sections is this run's intent: intended = everything the merged PRs declared (tag each clause with its source PR#); invariant = everything else.
    4. **Zero intent sections found? Degrade LOUDLY — don't declare everything suspect.** Say up front: *"No Percy Visual Intent sections found in `<app_repos>` — either nothing merged or the app team doesn't use this plugin. Falling back to PR titles/bodies as weak intent (lower confidence)."* Then use the merged PRs' **titles + bodies as a weak-intent tier**: a diff that plausibly matches one is `expected` (cite the PR#, flag it weak-intent / lower confidence) rather than an anomaly; reserve `likely-bug` for diffs that nothing merged can explain. Only when the window contains **no merged PRs at all** is the intent genuinely empty — "no visual change expected" — and *any* real change is suspect.
    5. **Test-suite changes:** renamed/added snapshots from suite updates are new baselines, not anomalies. If the test suite lives in a **separate repo** from the app, gather merged-PR intent from *both* repos.
    6. **Caveat — merges ≠ deploys.** The tested environment may lag the branch: a PR merged an hour ago is "expected intent" by the window but may not be deployed to the environment the suite ran against. When the user can provide a deploy window (release tag, deploy manifest, deployment timestamp), prefer it over the merge window.
-   Do NOT fall into NO-INTENT mode. Verdicts then run normally: a diff that matches a merged PR's intent → **expected** (cite the PR#); **dynamic/flaky** via Step 6b's history check; the rest → **genuine anomaly** (deploy/data/env — or a regression the PR loop missed) → `likely-bug`, noting the likely-external cause. `/percy:gate` treats regression builds as **triage, not iterate** (see its Case R).
+   7. **Rollback hint.** If an unexplained change looks like the *inverse* of an intent merged **before** the window (e.g. buttons going back from teal to navy after an earlier "teal refresh" PR), say so: *"looks like PR #17 was rolled back — nothing merged since explains it."* Check the intents/titles of PRs merged in the ~30 days before the window for this. A rollback with no PR (a revert deploy, a reset branch) is exactly what a regression run should catch.
+   Do NOT fall into NO-INTENT mode. Verdicts follow the **regression-mode rules in Step 8**. `/percy-gate` treats regression builds as **triage, not iterate** (see its Case R).
 
-**If none yield usable intent — try auto-backfill BEFORE degrading.** If an open PR exists for the branch (or `git diff origin/<default>...HEAD` is non-empty), the intent isn't missing — it just wasn't captured. Invoke `/percy:visual-intent` in proposal mode right now:
+**If none yield usable intent — try auto-backfill BEFORE degrading.** If an open PR exists for the branch (or `git diff origin/<default>...HEAD` is non-empty), the intent isn't missing — it just wasn't captured. Invoke `/percy-visual-intent` in proposal mode right now:
 
 > No intent was captured for this PR — I've drafted one from the diff; accept to get full verdicts.
 
@@ -194,10 +220,10 @@ Without a stated intent, the mechanical rule misflags intentional changes that l
 In NO-INTENT mode:
 - **Do not produce per-comparison `expected | likely-bug | ambiguous` verdicts.** The signal isn't reliable.
 - Surface a strong warning at the top of the output:
-  > ⚠️ **No Visual Intent found.** This run will report Percy's raw `irregularity` signal without intent reconciliation. Expect false positives on intentional changes (A/B tests, feature toggles, planned redesigns). To get reliable verdicts, run `/percy:visual-intent` first to capture what's *meant* to change.
+  > ⚠️ **No Visual Intent found.** This run will report Percy's raw `irregularity` signal without intent reconciliation. Expect false positives on intentional changes (A/B tests, feature toggles, planned redesigns). To get reliable verdicts, run `/percy-visual-intent` first to capture what's *meant* to change.
 - For each comparison with any `visual_quality: irregularity` region, output: `🐞 candidate-bug` (not `likely-bug`). The "candidate" label signals to the user that this needs eyeballs because the plugin can't tell if it's real.
 - For each comparison without irregularities, output: `🔄 unverified-change` (diff exists, no AI-flag, no intent to compare against).
-- The output is informational only — `/percy:gate` will refuse to auto-reject in this mode.
+- The output is informational only — `/percy-gate` will refuse to auto-reject in this mode.
 
 Skip the rest of the verdict matrix below. Jump to Step 10's output.
 
@@ -216,15 +242,25 @@ For each comparison, you have:
 2. **Percy's `change_reason` / `visual_quality`** — Percy's own deliberate-vs-unintended judgment. Use when intent/code is silent on this surface.
 3. **General visual coherence** ("the page still looks clean / the change looks deliberate") — a *last-resort tiebreaker only*. **Never clear a flag on coherence alone when intent or code context is available.**
 
+> **⚠️ Regression mode changes the rules (Step 7.4 builds).** In a QA/regression-suite repo the working tree is the *test suite*, so "no matching code change in the git diff" is true of **every** region and proves nothing. **The "valid + no matching code change → expected (dynamic content)" row below does NOT apply.** Use these rules instead:
+> - **Code context = the merged app PRs in the window** (their intent sections, titles/bodies, and changed files from Step 7.4.2) — not the local diff.
+> - **Explained** — matches a merged PR's intent, or its title/body/changed files plausibly produce this surface (weak intent: say so) → `expected`, citing the PR#.
+> - **Noise** — `change_reason` explicitly says dynamic content / rendering or anti-aliasing variation / sub-pixel shift, or Step 6b's history marks the surface dynamic or flaky → `expected` (noise) or `likely-flaky-test`.
+> - **Unexplained but Percy says `valid`** — a real, deliberate-looking change that nothing merged in the window explains → **`unplanned-change`** with the reason *"changed with nothing merged to explain it — possible deploy, rollback, config or data change"* (+ the Step 7.4.7 rollback hint when it fits). **Never `expected`, never approved as part of a one-confirm "all explained" run.** (`actionable_unintended` is irrelevant here — there is no fix loop.)
+> - **Unexplained and Percy says `irregularity`** → `likely-bug` (Percy saw a defect and nothing merged explains it).
+> - **Explained surface but Percy says `irregularity` with a regression-like `change_reason`** → `likely-bug` — matching a merged PR's surface is not evidence the change is correct (same as the "Intent-match ≠ clean" rule below).
+>
+> *Why this exists:* a dry run on a nightly build where the app had been rolled back (teal buttons → navy, checkout label reverted, no PR) produced only Percy-`valid` regions. Under the PR-mode table every one of them would have cleared as "dynamic content" and the rollback would have been approved into the baseline.
+
 > **Why precedence matters — worked counter-example (illustrative).** A coherence-only pass would clear such a build's flag by reasoning "it's just an icon swap, looks fine" — the *right verdict* (not a bug) for the *wrong reason*. The truth: the developer **intentionally added a voice-input feature**, visible only in the PR/code, not inferable from "it looks coherent." Coherence got lucky here; on a coherent-looking *real* regression it would have failed. Always reach for intent/code first; treat "looks fine" as the weakest evidence.
 
 > **Why "no code match" must NOT clear an `irregularity` — worked counter-example (illustrative).** PR title: *"add font load retry."* Percy flagged thumbnails replaced by spinners / a magenta placeholder as `irregularity` — i.e. **failed asset loads, plausibly the exact bug the PR was trying to fix, still occurring.** An over-eager "no diff touches the thumbnail component → dynamic content → clear" rule cleared all of them. That is the failure mode this gating exists to prevent: code-absence is a strong *clear* signal only when Percy itself said `valid`. When Percy said `irregularity`, code-absence is weak — the defect can be triggered indirectly (asset pipeline, shared dep, infra) — so default to `needs-human`, never auto-clear. *Note: when snapshot history IS available, Step 6b's dynamic-content check resolves this build to `likely-flaky-test` (dynamic carousel) first — see that step. The `needs-human` default here is the no-history fallback.*
 
-> **Reconcile EACH cluster (illustrative) — a matching headline change does not clear the build.** Suppose a PR's stated change (a toast-implementation swap) matches one cluster — an over-eager pass would clear the whole build. But a *second* cluster — a newly added merchant-ID field that reorganised the surrounding layout — was **not in the stated intent and not produced by the toast diff**: an unplanned change the developer slipped in alongside the planned one. Every cluster gets its own verdict: the toast change is `expected`, the merchant-field reflow is `unplanned-change` (flag for human). Never let a matched dominant change suppress a co-occurring unplanned one. (In-session `/percy:visual-intent` would also record the field add, making this explicit.)
+> **Reconcile EACH cluster (illustrative) — a matching headline change does not clear the build.** Suppose a PR's stated change (a toast-implementation swap) matches one cluster — an over-eager pass would clear the whole build. But a *second* cluster — a newly added merchant-ID field that reorganised the surrounding layout — was **not in the stated intent and not produced by the toast diff**: an unplanned change the developer slipped in alongside the planned one. Every cluster gets its own verdict: the toast change is `expected`, the merchant-field reflow is `unplanned-change` (flag for human). Never let a matched dominant change suppress a co-occurring unplanned one. (In-session `/percy-visual-intent` would also record the field add, making this explicit.)
 
 > **Intent-match ≠ clean (illustrative).** PR intent: a hidden-password eye-toggle. Percy flagged the eye-toggle region — which *matches the intended surface* — so a naive "matches intent → expected" rule would clear it. But the region was `irregularity` and the change itself was broken. **A cluster that matches the intended surface but whose `visual_quality`/`change_reason` reads regression-like is `likely-bug`, not `expected`** (matrix row: *irregularity · matches intent BUT change_reason unintended → likely-bug*). Matching the surface the dev meant to touch is not evidence the change is correct.
 
-For each region in the comparison:
+For each region in the comparison (skip regions with `ignored: true`; a region whose `visual_quality` is neither `valid` nor `irregularity` — e.g. `non-classified` with title *"Irrelevant change"* — is Percy's own filtered noise: treat it as benign and don't let it drive the verdict):
 
 1. **Read the region's `change_title` + `change_description` + `change_reason`.** `change_reason` is the most valuable field — it's Percy's own natural-language judgment of *whether the change looks deliberate or accidental*. Examples:
    - *"This is a deliberate CSS color change that affects the site's branding/visual hierarchy… not an expected dynamic variation like timestamps"* → Percy itself says **deliberate**.
@@ -265,7 +301,7 @@ Also factor in the cluster-promoted bug flag: if the cluster is bug-promoted but
 
 **Per-comparison verdict = worst region verdict** (ordered: likely-bug > unplanned-change > needs-human > expected).
 
-**For `unplanned-change`, also set `actionable_unintended` (boolean).** An unplanned-change is a real, code-backed change that isn't in the stated intent — which can be either an *accidental side-effect* or a *deliberate change the developer simply didn't write down*. Decide which, and set the flag so `/percy:gate` knows whether to auto-iterate or defer to a human:
+**For `unplanned-change`, also set `actionable_unintended` (boolean).** An unplanned-change is a real, code-backed change that isn't in the stated intent — which can be either an *accidental side-effect* or a *deliberate change the developer simply didn't write down*. Decide which, and set the flag so `/percy-gate` knows whether to auto-iterate or defer to a human:
 - `actionable_unintended: true` — you're **confident it wasn't intended**: it reads like a ripple/side-effect (e.g. a shared-component or global-CSS edit changed a surface the PR wasn't about), it's regression-adjacent, or it contradicts the spirit of the stated intent. The gate folds these into the iterate set and the agent fixes them — and if the developer says it *was* deliberate, the fix is to add it to intent, not revert.
 - `actionable_unintended: false` — it could **plausibly be deliberate-but-unstated** (a reasonable change on a surface the dev was working in, just not mentioned). The gate routes these to human review — don't risk auto-reverting something intended.
 
@@ -278,7 +314,7 @@ When in doubt, prefer `false` (send to a human) — auto-iterating on a delibera
 ```
 GET /api/v1/network-logs?comparison_id=<id>
 Authorization: Basic <base64(PERCY_USERNAME:PERCY_ACCESS_KEY)>
-User-Agent: curl/8.7.1
+User-Agent: $PERCY_PLUGIN_UA
 ```
 
 The response includes per-resource `asset-captured` status (`ok | NA | error | skipped`) plus failure categories like `asset_capture_failure` or `responsive_asset_capture_network_idle_failed`.
@@ -313,7 +349,7 @@ Where `<project_base>` = first 3 path segments of `web-url` (e.g., `https://perc
 
 Percy doesn't deep-link to a specific comparison — only snapshot. Label each row with the browser + width so the user knows which tab to select inside the snapshot view.
 
-**Link formatting — deep, specific, and clickable (applies everywhere the plugin surfaces a link, here and in `/percy:gate`):**
+**Link formatting — deep, specific, and clickable (applies everywhere the plugin surfaces a link, here and in `/percy-gate`):**
 - **Deep-link to the specific snapshot that has the issue** — the `…/changed/<snapshot_id>` URL — **not** the build root. If only one snapshot/comparison is flagged, the link must point straight at that snapshot, not at the build.
 - **Always render as a Markdown link** so it's clickable in the IDE — `[<snapshot name> — <browser> @ <width>px](<deep-link>)`, never a bare/angle-bracketed URL. (Claude Code and other IDE chats render Markdown; a raw `<url>` shows as plain text.)
 - Reserve the build-root link for genuinely build-wide statements (e.g. "approve the whole build"); anything tied to a specific snapshot gets that snapshot's deep-link.
@@ -349,7 +385,7 @@ Return the structured verdict object:
 }
 ```
 
-`/percy:gate` consumes this object.
+`/percy-gate` consumes this object.
 
 ## Cold start — no approved baseline yet (check BEFORE NO-AI fallback)
 
@@ -366,14 +402,14 @@ There are no comparisons to classify because nothing came before it. **This is e
 **If write creds are verified** (`write_creds_verified: true` in config, or `PERCY_USERNAME` + `PERCY_ACCESS_KEY` in the env), don't stop at the deep-link — offer to do it here:
 > Approve it as the baseline now? (y/n)
 
-On yes, `POST /api/v1/reviews` with `action: "approve"` (same request shape + Basic auth as `/percy:gate`'s approve). Whichever path the user takes — in-chat approve or the dashboard link — once the build is approved, update `.percy/config.yml → has_approved_baseline: true` and print:
+On yes, `POST /api/v1/reviews` with `action: "approve"` (same request shape + Basic auth as `/percy-gate`'s approve). Whichever path the user takes — in-chat approve or the dashboard link — once the build is approved, update `.percy/config.yml → has_approved_baseline: true` and print:
 > Baseline locked. From here: change UI, open a PR — intent, watch, review and gate run automatically.
 
-Do **not** run `/percy:gate` — there's nothing to gate.
+Do **not** run `/percy-gate` — there's nothing to gate.
 
 **Case B — fresh/upgraded baseline awaiting approval (AI blocked until approved).**
 Signals: the build has comparisons (`total-comparisons > 0`) but `total-comparisons-with-ai === 0`, AND `review-state` is `unreviewed` / `total-snapshots-unreviewed > 0`, AND/OR `different-base-build === true` (Percy shifted the base, e.g. a browser-version upgrade created a new baseline). Percy commonly defers AI on a build whose baseline is itself unapproved. Output:
-> 🟡 **Baseline needs approval before AI runs.** This build diffs against a new/upgraded baseline that isn't approved yet (`review-state: unreviewed`, `different-base-build: true`), so Percy hasn't produced AI classification. Approve the baseline build in Percy, then re-run `/percy:review` (or re-trigger the build) to get verdicts. [Open the build in Percy ↗](<build deep-link>)
+> 🟡 **Baseline needs approval before AI runs.** This build diffs against a new/upgraded baseline that isn't approved yet (`review-state: unreviewed`, `different-base-build: true`), so Percy hasn't produced AI classification. Approve the baseline build in Percy, then re-run `/percy-review` (or re-trigger the build) to get verdicts. [Open the build in Percy ↗](<build deep-link>)
 
 Surface the changed snapshots with deep-links so the user can approve quickly. Only fall through to NO-AI fallback if **neither** cold-start case matches.
 
@@ -387,14 +423,14 @@ If neither cold-start case (above) applies AND `total-comparisons-with-ai === 0`
    - `ai-enabled: False` BUT other recent builds DO have AI → **likely browser pool config issue** (this build's browsers aren't AI-eligible; AI-eligible = Chrome/Firefox on Linux currently)
    - Some recent builds have AI, this one doesn't → **likely browser-upgrade limbo or branch config**
 3. Output: list all changed snapshots with dashboard deep-links, label the cause, and tell the user the plugin **cannot auto-classify**. Recommend manual review on Percy dashboard.
-4. **Do not call `/percy:gate` for a binary decision** in NO-AI mode. The signal isn't reliable enough.
+4. **Do not call `/percy-gate` for a binary decision** in NO-AI mode. The signal isn't reliable enough.
 
 ## Important
 
 - **The agent does the verdict reasoning, not Python.** Resist building keyword/regex matchers for intent ↔ region matching. Use semantic understanding.
 - **`change_reason` is the highest-value Percy field.** It's Percy's own deliberate-vs-unintended judgment in plain text. Weight it heavily.
-- **Code context is the strongest false-positive filter.** A Percy-flagged region with no matching code change in the git diff is almost always dynamic content / fixture variance, not a regression.
+- **Code context is the strongest false-positive filter — in PR mode.** A Percy-flagged region with no matching code change in the git diff is almost always dynamic content / fixture variance, not a regression. **Not in regression mode**, where the local diff is the test suite: there, "nothing merged explains it" makes a change *suspect*, not benign (Step 8's regression rules).
 - **Percy's text + code context are the only inputs.** The plugin is Percy-AI-native by design (see "Design principle"). Do not add any further inference pass; unresolvable cases route to `needs-human`.
 - **Surface Percy reasoning verbatim** (`change_description`, `change_reason`, `visual_quality_reason`) — these are the most useful signals for both the agent and the human.
 - **Cluster-level bug promotion is the ONE mechanical rule.** Apply consistently; don't extend.
-- This skill is **read-only** for verdicts. Never call `/reviews` to act on a verdict from here — that's `/percy:gate`'s job. The one exception: the cold-start Case A baseline approve (user-confirmed, nothing to gate).
+- This skill is **read-only** for verdicts. Never call `/reviews` to act on a verdict from here — that's `/percy-gate`'s job. The one exception: the cold-start Case A baseline approve (user-confirmed, nothing to gate).

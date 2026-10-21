@@ -13,7 +13,7 @@ verdict definitions, and the Percy REST/MCP backend.
 In Copilot Chat (VS Code / Visual Studio / JetBrains), type `/` and pick one:
 
 - `/percy-expand-coverage` — Expand Percy visual coverage in a specific test file. Analyzes the file, finds logical touchpoints that lack a visual checkpoint (after an action, before an assertion, at distinct UI states), proposes percySnapshot() insertions, confirms with you, inserts them, and suggests a build. The 'day-2' companion to /percy-integrate for growing coverage as the app evolves.
-- `/percy-gate` — Enforce the visual review loop before a UI change can ship. Runs /percy-review, then auto-iterates on the fix for anything that needs fixing — likely-bugs, unplanned changes the plugin is confident weren't intended, AND any human-rejected build (including after a manual review of a flagged comparison). Surfaces reasoning, rejects on confirmation, prompts the agent to fix, and re-runs — up to 3 iterations with a delta-gate and snapshot budget. The single skill to run before merging UI changes.
+- `/percy-gate` — The one command for reviewing a Percy build, for developers and QA alike. Developer PR loop: runs /percy-review, surfaces real bugs and unintended changes, rejects on confirmation, has the agent fix them and re-runs (up to 3 iterations, delta-gate, snapshot budget). QA / regression-suite repos (repo_role: regression-suite): morning triage of the latest nightly or regression run — explains each diff from the app PRs merged since the last approved run, approves explained and noise snapshots, flags unexplained ones and anomalies, and reports them the way the team files bugs; no code edits. Reviewing someone else's PR build: approve or request changes plus a PR comment. Every Percy write and every bug report waits for the human's yes.
 - `/percy-integrate` — Integrate Percy into a project that already has a functional test suite but no visual testing yet. Detects the language + test framework, installs the matching BrowserStack Percy SDK + @percy/cli, wires config, inserts the first percySnapshot() calls (with your approval), and suggests a first build. Run this once per project to go from zero to visual coverage.
 - `/percy-migrate` — Migrate a project's existing visual testing to Percy. Handles two families: (A) Applitools Eyes — maps eyes.open/check/close, coded regions, and applitools.config.js to percySnapshot(), Percy regions, and .percy.yml; (B) in-house screenshot assertions — Playwright toHaveScreenshot(), cypress-image-snapshot, jest-image-snapshot, WDIO visual service — replacing local golden-file baselines with Percy's server-side baselines. Proposes a full mapping before touching code, and is honest about what has no Percy equivalent.
 - `/percy-review` — Poll the latest Percy build for the current branch until it completes, fetch Percy's AI region data + cluster summary + per-comparison bug flags, and reconcile each comparison against the captured Percy Visual Intent plus the developer's code context. Produces a verdict per comparison — expected, ambiguous, likely-bug, or unplanned-change — using agent semantic reasoning over Percy's AI text outputs, not keyword matching.
@@ -26,6 +26,9 @@ In Copilot Chat (VS Code / Visual Studio / JetBrains), type `/` and pick one:
 
 Typical order: `/percy-setup` → `/percy-integrate` or `/percy-expand-coverage` →
 `/percy-visual-intent` → `/percy-review` → `/percy-gate`.
+
+QA / regression-suite repos: `/percy-setup` once (it records the regression branch and
+app repos), then `/percy-gate` each morning to triage the latest regression run.
 
 > Copilot CLI does not support prompt files — CLI users still get the `AGENTS.md`
 > behavior, but invoke the workflow by describing it rather than via `/percy-*`.

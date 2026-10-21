@@ -8,6 +8,18 @@ argument-hint: "[optional: branch name; defaults to current branch]"
 
 Lightweight status check. Returns the most recent Percy build for the given branch (or current branch) without polling or doing any classification work.
 
+## User-Agent (every Percy API call)
+
+Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
+
+```
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=status; install=<install_id>) curl/8.7.1"
+```
+
+- `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
+- `channel` / `install` — `install_channel` / `install_id` from `.percy/config.yml` (`unknown` / `none` if absent). `role` — `repo_role` from the same file (`app` if absent).
+- Never put names, emails, tokens, or repo names in it. Keep the trailing `curl/8.7.1` — Percy's edge has blocked unrecognised agents before.
+
 ## Steps
 
 ### 1. Resolve branch
@@ -20,7 +32,7 @@ If `$ARGUMENTS` is blank, use `git rev-parse --abbrev-ref HEAD`. Otherwise use t
 GET /api/v1/builds?filter[branch]=<branch>&page[limit]=1
 ```
 
-Headers: `Authorization: Token token="$PERCY_TOKEN"`, `User-Agent: curl/8.7.1`.
+Headers: `Authorization: Token token="$PERCY_TOKEN"`, `User-Agent: $PERCY_PLUGIN_UA` (see above).
 
 ### 3. Report
 
@@ -45,11 +57,11 @@ AI: <total-potential-bugs> potential bugs · summary=<summary-status> · jobs-do
 Created: <relative time from created-at>
 ```
 
-If no build exists for this branch, say so and suggest `/percy:run-build`.
+If no build exists for this branch, say so and suggest `/percy-run-build`.
 
-If the build is still in progress, suggest the user wait or run `/percy:review` to start polling.
+If the build is still in progress, suggest the user wait or run `/percy-review` to start polling.
 
 ## Important
 
 - Don't poll in this skill. One read, one report, done.
-- Don't classify or recommend reject/iterate here. That's `/percy:review` and `/percy:gate`.
+- Don't classify or recommend reject/iterate here. That's `/percy-review` and `/percy-gate`.

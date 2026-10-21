@@ -5,7 +5,7 @@ description: "One-time Percy setup for this project. Verifies BrowserStack crede
 
 # Percy Setup
 
-One-time configuration so the other Percy skills (`/percy:visual-intent`, `/percy:review`, `/percy:gate`, `/percy:run-build`, `/percy:status`) can work without re-asking the user every time.
+One-time configuration so the other Percy skills (`/percy-visual-intent`, `/percy-review`, `/percy-gate`, `/percy-run-build`, `/percy-status`) can work without re-asking the user every time.
 
 ## What this skill does
 
@@ -14,23 +14,35 @@ One-time configuration so the other Percy skills (`/percy:visual-intent`, `/perc
 3. Probes the user's tier — does this account have Percy AI classification?
 4. Persists detected state to `.percy/config.yml` (gitignored).
 
+## User-Agent (every Percy API call)
+
+Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
+
+```
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
+```
+
+- `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
+- `channel` / `install` — `install_channel` / `install_id` from `.percy/config.yml` (`unknown` / `none` if absent). `role` — `repo_role` from the same file (`app` if absent).
+- Never put names, emails, tokens, or repo names in it. Keep the trailing `curl/8.7.1` — Percy's edge has blocked unrecognised agents before.
+
 ## Steps
 
 ### 0. Detect where this project is — and route
 
-`/percy:setup` is the single entry point; figure out the project's state before anything else, so the user never has to know which skill they needed:
+`/percy-setup` is the single entry point; figure out the project's state before anything else, so the user never has to know which skill they needed:
 
 | Signal | State | Route |
 |---|---|---|
-| No `@percy/*` dep, no `percySnapshot(` calls anywhere | **Not integrated** — has tests but no visual coverage | Say so, and offer to run `/percy:integrate` right now (it installs the SDK, wires config, inserts the first snapshots — then returns here to finish setup). |
+| No `@percy/*` dep, no `percySnapshot(` calls anywhere | **Not integrated** — has tests but no visual coverage | Say so, and offer to run `/percy-integrate` right now (it installs the SDK, wires config, inserts the first snapshots — then returns here to finish setup). |
 | Percy integrated, but no builds / no approved baseline | **Cold start** | Continue setup; Step 4b explains the baseline flow and offers to kick the first build. |
 | Integrated + builds + approved baseline | **Ready** | Continue setup normally — verify creds, detect AI tier, write config, hook the workflow (Step 6). |
 
-One command in, the right journey out — "new to Percy" and "existing Percy user" both just run `/percy:setup`.
+One command in, the right journey out — "new to Percy" and "existing Percy user" both just run `/percy-setup`.
 
 **Also determine the repo's role + regression branch — but only ask when a signal says to.** Downstream skills behave differently per role, so stamp it in config. Default silently to `repo_role: app`, `regression_branch: null` unless a signal is detected; **NEVER ask these questions on a cold-start or not-integrated project** (a user who hasn't run their first build has no regression flow to describe — the questions just read as noise):
 - **Role signal:** a suite-only repo is mostly test files with no app source; an app repo has the app + tests. Only ask "app repo, regression suite, or both?" when the tree genuinely looks suite-only (or mixed) — otherwise stamp `repo_role: app` without asking.
-- **Regression-branch signal:** branch names matching `pre.?prod|qa|staging|regression|release`; a non-default branch with recurring **non-PR** Percy builds (`GET /builds?filter[branch]=`); the project's `auto_approve_branch_filter` / default-base-branch settings. **Check CI files too** — the regression branch may only exist as a `PERCY_BRANCH` env var in the CI config, not as a local git branch. If a signal hits, confirm with the user once and persist as `regression_branch`; if nothing hits, stamp `null` silently.
+- **Regression-branch signal:** branch names matching `pre.?prod|qa|staging|regression|release`; a non-default branch with recurring **non-PR** Percy builds (`GET /builds?filter[branch]=`); the project's `auto_approve_branch_filter` / default-base-branch settings. **Check CI files too** — the regression branch may only exist as a `PERCY_BRANCH` env var in the CI config, not as a local git branch. If a signal hits, confirm with the user once and persist as `regression_branch`; if nothing hits, stamp `null` silently. **More than one** (one per environment is common — e.g. `pre_prod` and `master`, each built nightly) → persist all of them as `regression_branches: [pre_prod, master]`. Store names **without** an `origin/` prefix even if Percy shows `origin/pre_prod` — downstream skills match both forms.
 - **App repos (regression-suite only).** When `repo_role: regression-suite` (or `both` with a separate app), setup MUST ask: "which repo(s) does the app code live in?" — regression reviews harvest merged-PR intent from those repos, so the plugin can't guess them. Stamp the answer as `app_repos: [owner/name, ...]` in config.
 
 ### 1. Check credentials — and guide a new user all the way
@@ -60,7 +72,7 @@ One command in, the right journey out — "new to Percy" and "existing Percy use
    PATCH /api/v1/projects/<project_id>
    {"data": {"type": "projects", "id": "<project_id>", "attributes": {"default-base-branch": "<repo default branch>"}}}
    ```
-   **Pick the `master` (full-access) token** from that list — token roles are `master`, `write_only`, `read_only`. The plugin's `PERCY_TOKEN` must be the master token: `write_only` works for `percy exec` uploads but **403s on the review loop's reads** (builds/snapshots/comparisons), which breaks `/percy:review`/`/percy:gate`. Don't probe-and-swap — select `attributes.role == "master"` directly.
+   **Pick the `master` (full-access) token** from that list — token roles are `master`, `write_only`, `read_only`. The plugin's `PERCY_TOKEN` must be the master token: `write_only` works for `percy exec` uploads but **403s on the review loop's reads** (builds/snapshots/comparisons), which breaks `/percy-review`/`/percy-gate`. Don't probe-and-swap — select `attributes.role == "master"` directly.
    Valid `attributes.type` values: `web` (this plugin's case), `app`, `automate`, `generic`. A 400 "param is missing: type" means the type attribute is absent/misplaced — it belongs inside `attributes`. POSTing to bare `/api/v1/projects` is not the create route.
 
 Only when BrowserStack creds are absent does the browser walkthrough below apply.
@@ -94,27 +106,27 @@ In every path the user pastes the actual value **in their editor**, never in cha
     PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
 ```
 Guardrails on this — it is a convenience, **never a prerequisite**:
-- **Not a fallback for local-build trouble.** If a local build fails to launch the browser, that is a percy-Chromium issue (`/percy:run-build` Step 2 resolves it), **not** a reason to set up CI. Never reason "local won't work → wire CI." For local or demo runs, `/percy:run-build` is the intended path.
+- **Not a fallback for local-build trouble.** If a local build fails to launch the browser, that is a percy-Chromium issue (`/percy-run-build` Step 2 resolves it), **not** a reason to set up CI. Never reason "local won't work → wire CI." For local or demo runs, `/percy-run-build` is the intended path.
 - **Only wire CI if the repo already has `.github/workflows/`** — add the env line to the existing test job. Do **not** create a new/parallel workflow unless the user explicitly asks.
 - **Never write the token as a secret non-interactively** (`gh secret set …` with a real token). Direct the user to paste it in the provider UI, or scaffold the workflow and let them add the secret themselves — a master token must not be piped into a secret store by the agent.
 
 Test it with a probe call:
 ```
-curl -sS -H "Authorization: Token token=\"$PERCY_TOKEN\"" -H "User-Agent: curl/8.7.1" \
+curl -sS -H "Authorization: Token token=\"$PERCY_TOKEN\"" -H "User-Agent: $PERCY_PLUGIN_UA" \
   "https://percy.io/api/v1/builds?page%5Blimit%5D=1"
 ```
-A 200 response confirms the token works. 401/403 → bad token. The `User-Agent: curl/8.7.1` header is required — Percy's Cloudflare layer blocks default UAs.
+A 200 response confirms the token works. 401/403 → bad token. Always send the plugin User-Agent (see above).
 
 ### 1b. Check GitHub access (gh CLI)
 
-Three workflows lean on GitHub: `/percy:visual-intent` (writes the intent section into the PR), `/percy:watch` (Path B watches the PR's Percy check), and regression reviews (harvesting merged-PR intent). Check `gh auth status` now, once, so the user isn't surprised mid-flow:
+Three workflows lean on GitHub: `/percy-visual-intent` (writes the intent section into the PR), `/percy-watch` (Path B watches the PR's Percy check), and regression reviews (harvesting merged-PR intent). Check `gh auth status` now, once, so the user isn't surprised mid-flow:
 
 - **Authenticated** → note it in config and move on.
 - **Missing/unauthenticated** → say what still works and what degrades — the plugin stays functional: intent is saved to `.percy/intent-<branch>.md` instead of the PR, watch uses direct Percy-API polling (Path A), and regression harvest falls back to commit messages. Offer `gh auth login` to unlock the full flow; don't block setup on it.
 
 ### 1c. BrowserStack user credentials (approve/reject)
 
-Approving/rejecting builds and smart-debug reads use these — one-time. `/percy:gate`'s approve/reject (`POST /reviews`) and `/percy:review`'s network-logs probe authenticate with **`PERCY_USERNAME` + `PERCY_ACCESS_KEY`** (HTTP Basic), not the project `PERCY_TOKEN` — a project token returns 403 on those endpoints.
+Approving/rejecting builds and smart-debug reads use these — one-time. `/percy-gate`'s approve/reject (`POST /reviews`) and `/percy-review`'s network-logs probe authenticate with **`PERCY_USERNAME` + `PERCY_ACCESS_KEY`** (HTTP Basic), not the project `PERCY_TOKEN` — a project token returns 403 on those endpoints.
 
 **Check for existing creds first** — same order as Step 1: the shell environment (`PERCY_USERNAME` + `PERCY_ACCESS_KEY` already exported), then the same project secrets files (`.env`, `.env.local`, `.env.test`, `.envrc`, `.percy/.env`, `cypress.env.json`) — grep for both names. If found but not loaded, wire the loading rather than asking again.
 
@@ -122,12 +134,12 @@ Approving/rejecting builds and smart-debug reads use these — one-time. `/percy
 
 **Verify with an authed probe:**
 ```
-curl -sS -o /dev/null -w "%{http_code}" -u "$PERCY_USERNAME:$PERCY_ACCESS_KEY" -H "User-Agent: curl/8.7.1" \
+curl -sS -o /dev/null -w "%{http_code}" -u "$PERCY_USERNAME:$PERCY_ACCESS_KEY" -H "User-Agent: $PERCY_PLUGIN_UA" \
   "https://percy.io/api/v1/network-logs?comparison_id=<any recent comparison id>"
 ```
 Any **non-401** response confirms the creds are live (a 404/422 on a stale comparison id still proves auth). If the project has no comparison yet (cold start), skip the probe and say so — the creds get exercised on the first gate action.
 
-Stamp the result as `write_creds_verified: true | false` in `.percy/config.yml` (Step 5). Don't block setup on it — reads work with `PERCY_TOKEN` alone; `/percy:gate` will just point back here when it needs to approve/reject.
+Stamp the result as `write_creds_verified: true | false` in `.percy/config.yml` (Step 5). Don't block setup on it — reads work with `PERCY_TOKEN` alone; `/percy-gate` will just point back here when it needs to approve/reject.
 
 ### 2. Note MCP availability (informational)
 
@@ -182,7 +194,7 @@ From the recent-builds probe (Step 4):
 - **A recent build is `review-state: approved` with a non-null `base-build`** → baseline established; AI diffs will work normally.
 
 Persist the result and, if cold, tell the user up front:
-> ⚠️ No approved baseline yet. Your first Percy build establishes the baseline — approve it in Percy, then subsequent builds get real visual diffs + AI classification. `/percy:review` will guide you through this.
+> ⚠️ No approved baseline yet. Your first Percy build establishes the baseline — approve it in Percy, then subsequent builds get real visual diffs + AI classification. `/percy-review` will guide you through this.
 
 ### 5. Write `.percy/config.yml`
 
@@ -194,12 +206,19 @@ has_approved_baseline: true | false      # false = cold start; first build will 
 write_creds_verified: true | false       # BrowserStack user creds (approve/reject + smart-debug) probed OK — Step 1c
 repo_role: app | regression-suite | both # how the PR loop vs regression triage applies here
 regression_branch: <name> | null         # branch scheduled/regression runs build on (e.g. pre_prod)
+regression_branches: [<name>, ...]       # optional — several regression branches (one per environment); supersedes regression_branch
 app_repos: [owner/name, ...]             # regression-suite only: repo(s) the app code lives in (intent harvest)
 mcp_available: true | false              # informational; plugin uses REST regardless
+install_channel: marketplace | install-sh | install-sh-copilot | manual  # how the plugin was installed (User-Agent)
+install_id: <8 hex chars>                # anonymous, random, per repo (User-Agent) — keep the existing value if present
 detected_at: <ISO timestamp>
 ```
 
-If `ai_classification_enabled: false`, warn the user that `/percy:review` and `/percy:gate` will degrade to NO-AI mode (surfacing diff counts without classification).
+**Gitignore the plugin's local files** when writing config: `.percy/config.local.yml` (per-person settings, e.g. a personal bug-reporting route) and `.percy/triage/` (working files for big builds). `.percy/config.yml` itself is meant to be committed.
+
+**`install_channel` / `install_id`** feed the plugin User-Agent (see the top of this skill). `install_channel`: read `.percy/.install-channel` if `install.sh` wrote one (`install-sh` / `install-sh-copilot`); otherwise `marketplace` when running as the Claude Code plugin, else `manual`. `install_id`: generate once with `openssl rand -hex 4` (any 8 random hex chars) and **never regenerate it** on later setup runs — it lets Percy count distinct repos without identifying anyone.
+
+If `ai_classification_enabled: false`, warn the user that `/percy-review` and `/percy-gate` will degrade to NO-AI mode (surfacing diff counts without classification).
 
 > Note: the plugin is Percy-AI-native — verdicts run on Percy's AI text outputs (`change_reason`, `change_description`) reconciled against the developer's code context. No additional host-agent capability is required.
 
@@ -211,27 +230,27 @@ Writing config isn't enough — nothing yet makes the visual loop *happen* on th
 
 ```markdown
 ## Visual review (Percy)
-<!-- percy-hook v2 -->
+<!-- percy-hook v3 role=app -->
 
 This repo uses the Percy Visual Testing plugin. When you change UI code:
-1. Before/while opening the PR, run `/percy:visual-intent` (it injects the intent section and auto-starts `/percy:watch`).
-2. The watcher runs `/percy:gate` automatically when the Percy build finishes — don't merge UI changes before the gate passes.
-3. If you skipped intent and a build already exists, run `/percy:gate` directly.
-4. If this repo's CI doesn't run Percy, run `/percy:run-build` after pushing — the watcher can't watch a build that never starts.
+1. Before/while opening the PR, run `/percy-visual-intent` (it injects the intent section and auto-starts `/percy-watch`).
+2. The watcher runs `/percy-gate` automatically when the Percy build finishes — don't merge UI changes before the gate passes.
+3. If you skipped intent and a build already exists, run `/percy-gate` directly.
+4. If this repo's CI doesn't run Percy, run `/percy-run-build` after pushing — the watcher can't watch a build that never starts.
 ```
 
 **For `repo_role: regression-suite`** (substitute the configured `regression_branch`):
 
 ```markdown
 ## Visual review (Percy)
-<!-- percy-hook v2 -->
+<!-- percy-hook v3 role=qa -->
 
-This repo is a Percy regression/QA suite. Morning triage: run `/percy:gate` — it resolves the latest build on `<regression_branch>`, classifies every diff (merged app-PR intent / dynamic noise / anomaly), and one confirm approves an all-explained run.
+This repo is a Percy regression/QA suite. Morning triage: run `/percy-gate` — it resolves the latest build on `<regression_branch>`, classifies every diff (merged app-PR intent / dynamic noise / anomaly), and one confirm approves an all-explained run.
 ```
 
-(`repo_role: both` → include both blocks under the one `<!-- percy-hook v2 -->` heading.)
+(`repo_role: both` → include both blocks under the one heading, marked `<!-- percy-hook v3 role=both -->`.)
 
-**Upgrade, don't skip.** The `<!-- percy-hook v2 -->` comment is the version marker. If the file already has a "Visual review (Percy)" section that is **older or markerless** (e.g. written by `install.sh` or a previous setup run), **replace that section in place with the v2 block above** — don't skip it as "already present," and don't append a duplicate. Only skip when the existing section already carries the current marker.
+**Upgrade, don't skip.** The `<!-- percy-hook v3 role=… -->` comment is the version **and role** marker. If the file already has a "Visual review (Percy)" section that is **older, markerless, or marked for a different role** (e.g. `install.sh` wrote the `role=app` block into what turns out to be a QA suite, or a `v2` block from an earlier release), **replace that section in place with the matching v3 block above** — don't skip it as "already present," and don't append a duplicate. Only skip when the existing marker is `v3` **and** its role matches `repo_role` (`regression-suite` ↔ `role=qa`).
 
 With this in place the workflow is hands-off: the developer (or their agent) just changes UI code and opens a PR — intent, watching, review, and gating chain automatically. Without it, every step is a manual invocation.
 

@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Expand Percy visual coverage in a specific test file. Analyzes the file, finds logical touchpoints that lack a visual checkpoint (after an action, before an assertion, at distinct UI states), proposes percySnapshot() insertions, confirms with you, inserts them, and suggests a build. The 'day-2' companion to /percy-integrate for growing coverage as the app evolves."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-expand-coverage/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->

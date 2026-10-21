@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Kick a Percy build for the current change without waiting for CI. Optional — only needed when the project's CI doesn't already run Percy, or for in-loop development before pushing. Prefers percy-cli + the project's existing test command."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-run-build/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->

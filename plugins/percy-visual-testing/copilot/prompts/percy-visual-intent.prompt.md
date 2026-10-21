@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: "Capture the agent's visual intent for the current change and inject it as a section into the PR description (or save it locally if no PR exists yet). The review agent later reads this to classify diffs as expected vs unplanned. Run on commit or before opening a PR."
 ---
 <!-- AUTO-GENERATED from plugins/percy-visual-testing/skills/percy-visual-intent/SKILL.md by scripts/gen-copilot.mjs — DO NOT EDIT BY HAND. Edit the SKILL and re-run the generator. -->
