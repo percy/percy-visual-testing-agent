@@ -26,7 +26,7 @@ In v1, **every reject decision is confirmed by the human** before Percy is actua
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.0 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.1 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -114,7 +114,27 @@ If `/percy-review` ran in **regression mode** (regression branch / non-PR / sche
    - **a different new diff** → triage it normally.
 3. Show **Still unresolved** as its own bucket at the top of the summary, with the ticket from the earlier run, and offer to comment on that ticket (*"still present in nightly #10"*) rather than filing a new one. Percy's own `approved` state on these snapshots doesn't change that; say so plainly.
 
-Present the triage as one summary (counts per bucket, then one line per cluster with snapshot names, browsers/widths, the cited PR# or Percy's reasoning, and a deep link), then ask in this order:
+**Present ONE build's triage, in this exact shape** (same table style as the developer flow — users compare them):
+
+> **Nightly #<n> triage** — [build #<n> ↗](<build web-url>) · `<regression_branch>` · <N> changed snapshots · compared with build #<base> ([↗](<base web-url>), <approved | unreviewed | changes requested>)
+> Merged in `<app repo>` since then: [#<pr> <title>](<pr url>), [#<pr> <title>](<pr url>) — or "nothing".
+
+| # | Snapshot | Browsers @ widths | Bucket | What changed (Percy) | Why | Suggested action | Open |
+|---|---|---|---|---|---|---|---|
+| 1 | Home | Chrome, Firefox, Safari, Edge @ 375, 1280 | ✅ Explained | Primary buttons navy → teal | [PR #12 Brand refresh](<pr url>) — intent section says buttons go teal; changes `assets/site.css` | Approve | [Home ↗](<this build's snapshot deep-link>) |
+| 2 | Journal | … | 🔁 Noise | Promo banner text changed | Percy: *"rotating promotional content…"*; changed in 4 of last 5 runs | Approve | [Journal ↗](…) |
+| 3 | Shop | … | 🛑 Anomaly | Product prices missing on all cards | Percy flagged `irregularity`; no merged PR touches prices (#12 only `site.css` colour, #13 only footer copy) → deploy / hotfix / config | Flag (request changes) + report | [Shop ↗](…) |
+
+Rules for the table:
+- **One row per snapshot** (that's what gets approved or flagged). If a snapshot has several changes, list them in "What changed" and give the worst bucket.
+- **Every PR citation is a Markdown link** with the PR title, plus the file(s) that explain the change — the user will open the PR's *Files changed* tab to show it. Never a bare "#12".
+- **Every "Open" link points into THIS build** (`…/builds/<this build>/changed/<snapshot_id>`). Earlier builds may be linked only in the "Still unresolved" section below, clearly labeled as earlier.
+- **Weak intent** (PR without an intent section): say *"matched on the PR title and diff (no intent section)"* in Why.
+- After the table, one line of totals: *"Approve 4 · Flag 1 · Needs your eyes 0"*.
+
+**🔁 Still unresolved from earlier runs** (only if Step R0 found any) — a second, short table: Snapshot · flagged in [build #<n> ↗](<that snapshot in the earlier build>) · ticket link · now: *"no diff tonight — Percy auto-approved it because nothing changed since the flagged capture; the problem is still live"* · [current capture ↗](<this build>).
+
+Then ask, in this order:
 
 1. **Approve the Explained + Noise snapshots?** — `action: "approve"` + the `snapshots` relationship (one confirm, listing them with their matched PR#s). Scoping is respected: exactly those snapshots flip to `approved`, so the baseline advances for those surfaces. If *everything* is Explained/Noise, this is the whole job — the QA time-saver: snapshot-by-snapshot eyeballing becomes one line.
 2. **Flag the Unexplained + Anomaly snapshots?** — `action: "request_changes"` + the `snapshots` relationship (one confirm, with Percy's reasoning + deep links). Scoping is respected: the flagged snapshots go `changes_requested`, the build becomes `changes_requested (changes_requested_snapshot)`, and the approvals from (1) stick.
