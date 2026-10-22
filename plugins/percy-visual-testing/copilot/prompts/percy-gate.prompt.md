@@ -26,7 +26,7 @@ In v1, **every reject decision is confirmed by the human** before Percy is actua
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.3 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.4 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -104,6 +104,7 @@ If `/percy-review` ran in **regression mode** (regression branch / non-PR / sche
 |---|---|---|
 | ✅ **Explained** | `expected` — matches a merged PR (link the PR and say what the match rests on — see the table rules) | Approve (snapshot-scoped), one confirm for the batch |
 | 🔁 **Noise** | `expected` (noise) / `likely-flaky-test` — dynamic content, rendering variation, flaky capture per history | Approve with the explained batch — list them separately so the user sees what's noise |
+| 🎨 **Looks deliberate** | Percy-only mode (no access to the app's code): `unplanned-change` with `design_change: true` — Percy calls it deliberate and it repeats consistently across pages | Ask: *"Approve these if they were in the release?"* — one confirm for the batch, never pre-ticked |
 | ⚠️ **Unexplained** | `unplanned-change` — Percy says valid, but nothing merged explains it (possible deploy, rollback, config or data change) | **Do not approve.** Flag via `request_changes`, then report (Step R2) |
 | 🛑 **Anomaly** | `likely-bug` — Percy flagged a defect that nothing merged explains, or an explained surface that changed in a broken-looking way | Flag via `request_changes`, then report (Step R2) |
 | 🙋 **Needs your eyes** | `needs-human` | Leave unreviewed; show Percy's reasoning verbatim + deep link |
@@ -122,6 +123,7 @@ If `/percy-review` ran in **regression mode** (regression branch / non-PR / sche
 
 > **Nightly #<n> triage** — [build #<n> ↗](<build web-url>) · `<regression_branch>` · <N> changed snapshots · compared with build #<base> ([↗](<base web-url>), <approved | unreviewed | changes requested>)
 > Merged in `<app repo>` since then: [#<pr> <title>](<pr url>), [#<pr> <title>](<pr url>) — or "nothing".
+> *(Percy-only mode instead: "No access to the app's code — explained from <the release notes you gave / Jira release X / Percy's AI and history only>.")*
 
 | # | Snapshot | Browsers @ widths | Bucket | What changed (Percy) | Why | Suggested action | Open |
 |---|---|---|---|---|---|---|---|
@@ -143,6 +145,7 @@ Rules for the table:
 
 Then ask, in this order:
 
+0. *(Percy-only mode, if any)* **"These N changes look like deliberate design changes — approve them if they were in the release?"** — list each with Percy's description and a link. Options: approve all · let me pick · leave them for later. No option is marked Recommended: only the QA engineer knows what shipped.
 1. **Approve the Explained + Noise snapshots?** — `action: "approve"` + the `snapshots` relationship (one confirm, listing them with their matched PR#s). Scoping is respected: exactly those snapshots flip to `approved`, so the baseline advances for those surfaces. If *everything* is Explained/Noise, this is the whole job — the QA time-saver: snapshot-by-snapshot eyeballing becomes one line.
 2. **Flag the Unexplained + Anomaly snapshots?** — `action: "request_changes"` + the `snapshots` relationship (one confirm, with Percy's reasoning + deep links). Scoping is respected: the flagged snapshots go `changes_requested`, the build becomes `changes_requested (changes_requested_snapshot)`, and the approvals from (1) stick.
 3. **Report them?** — Step R2.

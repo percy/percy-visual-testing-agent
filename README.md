@@ -50,7 +50,7 @@ One command to start — new to Percy, it walks you through account, token, and 
 
 You'll need your project's **`PERCY_TOKEN`** in the environment (Percy dashboard → project settings) — setup checks for it and tells you exactly what to do if it's missing. Never paste tokens into the chat. Approving/rejecting builds additionally uses your BrowserStack username + access key; setup covers that too.
 
-> **What the plugin sends.** Every Percy API call carries a `User-Agent` like `percy-visual-testing-agent/0.4.3 (agent=copilot-vscode; channel=install-sh-copilot; role=qa; skill=gate; install=3f9c2a1e) curl/8.7.1` — which coding agent, which workflow, and a random per-repo id. No names, emails, tokens or repo names.
+> **What the plugin sends.** Every Percy API call carries a `User-Agent` like `percy-visual-testing-agent/0.4.4 (agent=copilot-vscode; channel=install-sh-copilot; role=qa; skill=gate; install=3f9c2a1e) curl/8.7.1` — which coding agent, which workflow, and a random per-repo id. No names, emails, tokens or repo names.
 
 > **MCP is optional.** The plugin talks to Percy's REST API directly — no MCP server required. If you already use the BrowserStack MCP server, the plugin will happily use it where it helps.
 
@@ -118,6 +118,8 @@ Local setup is step one — day-to-day, Percy runs in CI. The token moves with i
 Two kinds of builds, two behaviors:
 - **PR builds** — the full loop: intent → watch → review vs intent + code → gate → fix-iterate.
 - **Regression runs** (default branch / scheduled / no PR) — the intent is **accumulated from the PRs merged since the last approved baseline**: the plugin re-reads the `## Percy Visual Intent` sections it wrote into those PRs, so legitimately-merged changes are expected, not noise. Every diff is then classified as *matches a merged PR's intent* (cited), *dynamic noise* (via snapshot history), or a *genuine anomaly* — and the gate switches to **triage**: one confirm approves an all-explained run; anomalies are surfaced with deep links for investigation (no code-fix loop — the cause is a deploy/data/env, not this working tree).
+
+**No access to the app's code?** Central QA teams testing vendors' apps often can't read the app repos. `/percy-setup` records that (`change_context: percy-only`), and the triage then explains changes from the vendor's **release notes** or a **Jira release** if you have them, otherwise from Percy's AI and snapshot history alone: Percy-flagged bugs are still caught, consistent design changes are grouped as "looks deliberate — approve if it was in the release", and anything else is left for your eyes.
 
 Two things to know: verdicts are sharpest when the app team's PRs carry Percy Visual Intent sections — without them, the plugin matches each change to a PR by its code change (and, failing that, its description) and says which one it used. And today the triage runs in an interactive IDE session — a scheduled headless recipe (cron + agent CLI posting the triage to Slack, human clicks stay human) is on the roadmap.
 

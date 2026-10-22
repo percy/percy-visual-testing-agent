@@ -19,7 +19,7 @@ One-time configuration so the other Percy skills (`/percy-visual-intent`, `/perc
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.3 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.4 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -44,6 +44,7 @@ One command in, the right journey out — "new to Percy" and "existing Percy use
 - **Role signal:** a suite-only repo is mostly test files with no app source; an app repo has the app + tests. Only ask "app repo, regression suite, or both?" when the tree genuinely looks suite-only (or mixed) — otherwise stamp `repo_role: app` without asking.
 - **Regression-branch signal:** branch names matching `pre.?prod|qa|staging|regression|release`; a non-default branch with recurring **non-PR** Percy builds (`GET /builds?filter[branch]=`); the project's `auto_approve_branch_filter` / default-base-branch settings. **Check CI files too** — the regression branch may only exist as a `PERCY_BRANCH` env var in the CI config, not as a local git branch. If a signal hits, confirm with the user once and persist as `regression_branch`; if nothing hits, stamp `null` silently. **More than one** (one per environment is common — e.g. `pre_prod` and `master`, each built nightly) → persist all of them as `regression_branches: [pre_prod, master]`. Store names **without** an `origin/` prefix even if Percy shows `origin/pre_prod` — downstream skills match both forms.
 - **App repos (regression-suite only).** When `repo_role: regression-suite` (or `both` with a separate app), setup MUST ask: "which repo(s) does the app code live in?" — regression reviews harvest merged-PR intent from those repos, so the plugin can't guess them. Stamp the answer as `app_repos: [owner/name, ...]` in config.
+  - **Many QA teams can't read the app's code** — a central QA team testing several vendors' apps, or app code outside GitHub. So ask it as a choice: *"Where does the app code live — and can you read it from here?"* → **GitHub repos I can read** (then which ones; check `gh repo view <repo>` works) · **I can't access the app's code**. On "can't access", stamp `app_repos: []` and `change_context: percy-only`, then ask: *"Do you get something that says what changed in each release?"* → **Release notes** (a file path or link, given at triage time) · **A Jira release / fix version** (needs an Atlassian/Jira tool) · **Nothing** — and stamp it as `change_sources: [release-notes | jira]` (empty = Percy-only). Say what this means once: *"Without the app's code, the triage relies on Percy's AI and your release notes/Jira to explain changes — it still catches anything Percy flags as broken."*
 
 ### 1. Check credentials — and guide a new user all the way
 
@@ -210,7 +211,10 @@ write_creds_verified: true | false       # BrowserStack user creds (approve/reje
 repo_role: app | regression-suite | both # how the PR loop vs regression triage applies here
 regression_branch: <name> | null         # branch scheduled/regression runs build on (e.g. pre_prod)
 regression_branches: [<name>, ...]       # optional — several regression branches (one per environment); supersedes regression_branch
-app_repos: [owner/name, ...]             # regression-suite only: repo(s) the app code lives in (intent harvest)
+app_repos: [owner/name, ...]             # regression-suite only: repo(s) the app code lives in (intent harvest); [] = no access
+change_context: repos | percy-only        # regression-suite only: percy-only when the QA team can't read the app's code
+change_sources: [release-notes, jira]    # percy-only: what else can explain a release (asked at triage); [] = Percy AI only
+jira_release: { project: <KEY> }          # if change_sources includes jira
 mcp_available: true | false              # informational; plugin uses REST regardless
 install_channel: marketplace | install-sh | install-sh-copilot | manual  # how the plugin was installed (User-Agent)
 install_id: <8 hex chars>                # anonymous, random, per repo (User-Agent) — keep the existing value if present

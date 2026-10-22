@@ -40,7 +40,7 @@ This skill therefore:
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.3 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.4 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -208,6 +208,10 @@ Priority:
         > *• #41 Mon — 2 changed snapshots, 1 bug flag*
         > *#43 shows what changed since Tuesday; Monday's and Tuesday's changes are already part of its baseline, so they won't appear in it. Triage #43, pick another run, or go through them oldest → newest?"*
         Counts come from each build's `total-comparisons-diff` / changed snapshots and `ai-details.total-potential-bugs` (one cheap call per build). Recommend the **latest** run. If the user picks another, triage that one; "oldest → newest" triages each in turn, each with its own table and confirms. With only one unreviewed run, don't ask — just triage it. Never merge findings from two runs into one table. (Open flags on a `changes_requested` run are carried forward by `/percy-gate` Step R0.)
+   1b. **No access to the app's code (`change_context: percy-only`, or `app_repos` empty, or `gh` can't read them).** Skip steps 2–3 and use the **Percy-only regression rules** in Step 8. Build "what changed in this release" from whatever the team has, asked once at the start as a real choice:
+      - `change_sources` has **release-notes** → *"Do you have the release notes for what shipped since <base build time>? (file path or link — or skip)"*. Read them (file, or WebFetch for a link) and turn each line into an intent clause tagged with its source (*"Release notes: 'Primary buttons now use the teal brand colour'"*).
+      - **jira** → with your Atlassian/Jira tool, list the issues in the release / fix version (ask which one, recommending the latest released) or resolved in the window; their summaries are intent clauses, each linked by issue key.
+      - Neither, or skipped → **Percy-only**: say it once, plainly — *"No release notes or code to compare against, so this triage uses Percy's AI and snapshot history."*
    2. **List the PRs merged in the gap.**
       - **Same repo** (app + suite live together): a SHA range works — `git log <last>..<head> --merges` / `gh pr list --state merged --base <regression_branch>`.
       - **Cross-repo — `app_repos` configured in `.percy/config.yml`: harvest with a TIME WINDOW, not a SHA range.** QA-repo SHAs don't exist in the app repos, so a SHA range is meaningless there. Window = this build's base build `created-at` → this build's `created-at` (step 1). Per app repo: `gh pr list -R <owner/name> --state merged --search "merged:<window-start>..<window-end>"`.
@@ -262,6 +266,14 @@ For each comparison, you have:
 > - **Unexplained and Percy says `irregularity`** → `likely-bug` (Percy saw a defect and nothing merged explains it).
 > - **Explained surface but Percy says `irregularity` with a regression-like `change_reason`** → `likely-bug` — matching a merged PR's surface is not evidence the change is correct (same as the "Intent-match ≠ clean" rule below).
 >
+> **Percy-only regression rules (no access to the app's code — Step 7.4.1b).** There are no PRs to cite and no code to match, so lean on what Percy and the run history *can* tell you, and on release notes / Jira when given:
+> - **Percy flags it (`irregularity`)** → `likely-bug` (**Anomaly**), as always. Unaffected by repo access.
+> - **Matches a release-notes line or Jira issue** → `expected` (**Explained**), citing that line or linking the issue key. Same strength rules as PRs: say what the match rests on.
+> - **Noise** — dynamic content / rendering variation per `change_reason`, Percy's `recurring-diff-detection-status`, or Step 6b history → `expected` (noise) / `likely-flaky-test`.
+> - **Looks like a deliberate design change** — Percy says `valid`, its `change_reason` reads deliberate, and the **same change repeats consistently** (one cluster spanning several snapshots, or the same `change_title` on many pages/browsers — e.g. every primary button recoloured) → `unplanned-change` with `design_change: true` (**🎨 Looks deliberate**). Suggested action: *"Approve if this was in the release"* — the QA engineer knows what the vendor shipped; the plugin can't.
+> - **Anything else** (a one-off change Percy calls `valid` but nothing explains) → `needs-human` (**🙋 Needs your eyes**), with Percy's description verbatim.
+> - **Never "Explained" without a source**, and never a code-based rollback hint (there's no PR history to compare against).
+>
 > *Why this exists:* a dry run on a nightly build where the app had been rolled back (teal buttons → navy, checkout label reverted, no PR) produced only Percy-`valid` regions. Under the PR-mode table every one of them would have cleared as "dynamic content" and the rollback would have been approved into the baseline.
 
 > **Why precedence matters — worked counter-example (illustrative).** A coherence-only pass would clear such a build's flag by reasoning "it's just an icon swap, looks fine" — the *right verdict* (not a bug) for the *wrong reason*. The truth: the developer **intentionally added a voice-input feature**, visible only in the PR/code, not inferable from "it looks coherent." Coherence got lucky here; on a coherent-looking *real* regression it would have failed. Always reach for intent/code first; treat "looks fine" as the weakest evidence.
@@ -271,6 +283,10 @@ For each comparison, you have:
 > **Reconcile EACH cluster (illustrative) — a matching headline change does not clear the build.** Suppose a PR's stated change (a toast-implementation swap) matches one cluster — an over-eager pass would clear the whole build. But a *second* cluster — a newly added merchant-ID field that reorganised the surrounding layout — was **not in the stated intent and not produced by the toast diff**: an unplanned change the developer slipped in alongside the planned one. Every cluster gets its own verdict: the toast change is `expected`, the merchant-field reflow is `unplanned-change` (flag for human). Never let a matched dominant change suppress a co-occurring unplanned one. (In-session `/percy-visual-intent` would also record the field add, making this explicit.)
 
 > **Intent-match ≠ clean (illustrative).** PR intent: a hidden-password eye-toggle. Percy flagged the eye-toggle region — which *matches the intended surface* — so a naive "matches intent → expected" rule would clear it. But the region was `irregularity` and the change itself was broken. **A cluster that matches the intended surface but whose `visual_quality`/`change_reason` reads regression-like is `likely-bug`, not `expected`** (matrix row: *irregularity · matches intent BUT change_reason unintended → likely-bug*). Matching the surface the dev meant to touch is not evidence the change is correct.
+
+**Two bug signals beyond the region list — check them before any region-level verdict:**
+- **The comparison's own bug count wins over its region list.** If `ai-details.total-potential-bugs > 0` on a comparison but none of its returned `applied-regions` is `irregularity`, Percy's region detail is incomplete (verified: a comparison with 8 potential bugs returned only `valid` / `non-classified` regions, one of which called the missing prices *"dynamic card data"*). Treat the comparison as bug-flagged, quote the count (*"Percy counts 8 potential bugs here"*), and never let a region's "dynamic" wording turn it into noise.
+- **A capture identical to one already flagged is the flagged problem again.** If a snapshot's `fingerprint` matches its capture in an earlier build where it was `changes_requested` or rejected, treat it as that same problem recurring → `likely-bug`, citing the earlier build.
 
 For each region in the comparison (skip regions with `ignored: true`; a region whose `visual_quality` is neither `valid` nor `irregularity` — e.g. `non-classified` with title *"Irrelevant change"* — is Percy's own filtered noise: treat it as benign and don't let it drive the verdict):
 
