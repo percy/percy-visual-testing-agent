@@ -40,7 +40,7 @@ This skill therefore:
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.1 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.2 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -60,7 +60,7 @@ GET /api/v1/network-logs?comparison_id=<id>                  # smart-debug / ass
 ```
 
 Most calls work with `Authorization: Token token="$PERCY_TOKEN"` and `User-Agent: $PERCY_PLUGIN_UA` (see above).
-**Note:** `/network-logs` requires user-token auth (BrowserStack `PERCY_USERNAME` + `PERCY_ACCESS_KEY` via HTTP Basic), not the project `PERCY_TOKEN`. Same auth class used by `/reviews`.
+**Note:** `/network-logs` requires user-token auth (BrowserStack `BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` via HTTP Basic), not the project `PERCY_TOKEN`. Same auth class used by `/reviews`.
 
 ## Steps
 
@@ -207,7 +207,7 @@ Priority:
       - **Cross-repo — `app_repos` configured in `.percy/config.yml`: harvest with a TIME WINDOW, not a SHA range.** QA-repo SHAs don't exist in the app repos, so a SHA range is meaningless there. Window = this build's base build `created-at` → this build's `created-at` (step 1). Per app repo: `gh pr list -R <owner/name> --state merged --search "merged:<window-start>..<window-end>"`.
       - **Also pull each merged PR's changed files** — `gh pr view <n> -R <owner/name> --json files,title,body` (add the diff for style/template/component files: `gh pr diff <n> -R <owner/name>`). This is regression mode's **code context**: it says which surfaces the merged work could have touched, and it works even when no PR carries an intent section. A PR that only touched `.npmrc`, CI config or backend code cannot explain a button recolor.
    3. **Harvest each one's `## Percy Visual Intent` — following the promotion hop if needed.** On many teams the regression branch receives **bot-created merge PRs** (e.g. "Merge feat/xyz — by automation") whose bodies carry no intent; the intent lives on the **original feature PR**. Resolve it: merge PR → source branch name → `gh pr list --head <branch> --state merged` → that PR's `## Percy Visual Intent` section. The **union** of the harvested sections is this run's intent: intended = everything the merged PRs declared (tag each clause with its source PR#); invariant = everything else.
-   4. **Zero intent sections found? Degrade LOUDLY — don't declare everything suspect.** Say up front: *"No Percy Visual Intent sections found in `<app_repos>` — either nothing merged or the app team doesn't use this plugin. Falling back to PR titles/bodies as weak intent (lower confidence)."* Then use the merged PRs' **titles + bodies as a weak-intent tier**: a diff that plausibly matches one is `expected` (cite the PR#, flag it weak-intent / lower confidence) rather than an anomaly; reserve `likely-bug` for diffs that nothing merged can explain. Only when the window contains **no merged PRs at all** is the intent genuinely empty — "no visual change expected" — and *any* real change is suspect.
+   4. **Zero intent sections found? Degrade LOUDLY — don't declare everything suspect.** Say up front: *"No Percy Visual Intent sections found in `<app_repos>` — either nothing merged or the app team doesn't use this plugin. I'll match changes on the PRs' code changes and descriptions instead."* Then match on each merged PR's **code change first, then its title and description**: a change the PR's code clearly produces is `expected` — a strong match, stated plainly (link the PR, name the file); a change that only the title/description suggests is `expected` with a *"worth a glance"* note. Reserve `likely-bug` for diffs that nothing merged can explain. Only when the window contains **no merged PRs at all** is the intent genuinely empty — "no visual change expected" — and *any* real change is suspect.
    5. **Test-suite changes:** renamed/added snapshots from suite updates are new baselines, not anomalies. If the test suite lives in a **separate repo** from the app, gather merged-PR intent from *both* repos.
    6. **Caveat — merges ≠ deploys.** The tested environment may lag the branch: a PR merged an hour ago is "expected intent" by the window but may not be deployed to the environment the suite ran against. When the user can provide a deploy window (release tag, deploy manifest, deployment timestamp), prefer it over the merge window.
    7. **Rollback hint.** If an unexplained change looks like the *inverse* of an intent merged **before** the window (e.g. buttons going back from teal to navy after an earlier "teal refresh" PR), say so: *"looks like PR #17 was rolled back — nothing merged since explains it."* Check the intents/titles of PRs merged in the ~30 days before the window for this. A rollback with no PR (a revert deploy, a reset branch) is exactly what a regression run should catch.
@@ -250,7 +250,7 @@ For each comparison, you have:
 
 > **⚠️ Regression mode changes the rules (Step 7.4 builds).** In a QA/regression-suite repo the working tree is the *test suite*, so "no matching code change in the git diff" is true of **every** region and proves nothing. **The "valid + no matching code change → expected (dynamic content)" row below does NOT apply.** Use these rules instead:
 > - **Code context = the merged app PRs in the window** (their intent sections, titles/bodies, and changed files from Step 7.4.2) — not the local diff.
-> - **Explained** — matches a merged PR's intent, or its title/body/changed files plausibly produce this surface (weak intent: say so) → `expected`, citing the PR#.
+> - **Explained** — matches a merged PR's intent, or its title/body/changed files plausibly produce this surface (say what the match rests on: Visual Intent, the code change, or only the description) → `expected`, linking the PR.
 > - **Noise** — `change_reason` explicitly says dynamic content / rendering or anti-aliasing variation / sub-pixel shift, or Step 6b's history marks the surface dynamic or flaky → `expected` (noise) or `likely-flaky-test`.
 > - **Unexplained but Percy says `valid`** — a real, deliberate-looking change that nothing merged in the window explains → **`unplanned-change`** with the reason *"changed with nothing merged to explain it — possible deploy, rollback, config or data change"* (+ the Step 7.4.7 rollback hint when it fits). **Never `expected`, never approved as part of a one-confirm "all explained" run.** (`actionable_unintended` is irrelevant here — there is no fix loop.)
 > - **Unexplained and Percy says `irregularity`** → `likely-bug` (Percy saw a defect and nothing merged explains it).
@@ -319,7 +319,7 @@ When in doubt, prefer `false` (send to a human) — auto-iterating on a delibera
 
 ```
 GET /api/v1/network-logs?comparison_id=<id>
-Authorization: Basic <base64(PERCY_USERNAME:PERCY_ACCESS_KEY)>
+Authorization: Basic <base64(BROWSERSTACK_USERNAME:BROWSERSTACK_ACCESS_KEY)>
 User-Agent: $PERCY_PLUGIN_UA
 ```
 
@@ -405,7 +405,7 @@ Signals (any of):
 There are no comparisons to classify because nothing came before it. **This is expected, not a bug.** Output:
 > 🟢 **First Percy build on this branch — it's the baseline, not a regression check.** There's nothing to diff against yet, so there's no AI verdict to give. Approve this build in Percy to lock it as the baseline; the *next* build will get real visual diffs + AI classification. [Open the build in Percy ↗](<build deep-link>)
 
-**If write creds are verified** (`write_creds_verified: true` in config, or `PERCY_USERNAME` + `PERCY_ACCESS_KEY` in the env), don't stop at the deep-link — offer to do it here:
+**If write creds are verified** (`write_creds_verified: true` in config, or `BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` in the env), don't stop at the deep-link — offer to do it here:
 > Approve it as the baseline now? (y/n)
 
 On yes, `POST /api/v1/reviews` with `action: "approve"` (same request shape + Basic auth as `/percy-gate`'s approve). Whichever path the user takes — in-chat approve or the dashboard link — once the build is approved, update `.percy/config.yml → has_approved_baseline: true` and print:

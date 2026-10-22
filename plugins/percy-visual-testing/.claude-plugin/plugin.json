@@ -1,6 +1,6 @@
 {
   "name": "percy-visual-testing",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Visual review loop for agent-driven UI development. Captures intent, polls Percy builds, classifies diffs, gates merges, and iterates until clean.",
   "author": {
     "name": "Percy",

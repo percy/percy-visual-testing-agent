@@ -19,7 +19,7 @@ One-time configuration so the other Percy skills (`/percy-visual-intent`, `/perc
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.1 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.2 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -47,7 +47,7 @@ One command in, the right journey out — "new to Percy" and "existing Percy use
 
 ### 1. Check credentials — and guide a new user all the way
 
-**Fast path — BrowserStack credentials present? Skip the browser entirely.** If `PERCY_USERNAME` + `PERCY_ACCESS_KEY` are already in the env/secrets (common on teams, CI machines, and demos), the whole token journey collapses into one question — the Percy API can list projects, create one, and fetch its token under those creds:
+**Fast path — BrowserStack credentials present? Skip the browser entirely.** If `BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` are already in the env/secrets (common on teams, CI machines, and demos), the whole token journey collapses into one question — the Percy API can list projects, create one, and fetch its token under those creds:
 
 1. **List** the account's organizations and Percy projects via the API (Basic auth with the BrowserStack creds). Exact endpoints — don't rediscover these:
    ```
@@ -126,15 +126,18 @@ Three workflows lean on GitHub: `/percy-visual-intent` (writes the intent sectio
 
 ### 1c. BrowserStack user credentials (approve/reject)
 
-Approving/rejecting builds and smart-debug reads use these — one-time. `/percy-gate`'s approve/reject (`POST /reviews`) and `/percy-review`'s network-logs probe authenticate with **`PERCY_USERNAME` + `PERCY_ACCESS_KEY`** (HTTP Basic), not the project `PERCY_TOKEN` — a project token returns 403 on those endpoints.
+**BrowserStack credentials (approve / flag / network-logs).** These are your **BrowserStack** username + access key — from BrowserStack → Account → Profile — in `BROWSERSTACK_USERNAME` / `BROWSERSTACK_ACCESS_KEY`, the same pair the BrowserStack SDKs use (so teams on BrowserStack Automate usually have them set already). The older names `PERCY_USERNAME` / `PERCY_ACCESS_KEY` are still accepted: use whichever pair is set. Look in the shell environment first, then `.percy/.env` and the repo's other gitignored secrets files (`.env`, `.env.local`, `.envrc`). Never ask the user to paste them into the chat.
 
-**Check for existing creds first** — same order as Step 1: the shell environment (`PERCY_USERNAME` + `PERCY_ACCESS_KEY` already exported), then the same project secrets files (`.env`, `.env.local`, `.env.test`, `.envrc`, `.percy/.env`, `cypress.env.json`) — grep for both names. If found but not loaded, wire the loading rather than asking again.
 
-**If missing, guide the user:** BrowserStack Dashboard → **Account** → **"Access Key"** (the username is shown alongside it). Persist `PERCY_USERNAME=` / `PERCY_ACCESS_KEY=` placeholder lines to the **same gitignored secrets file** Step 1 used — the user pastes the actual values **in their editor**, never in chat; the agent writes only the placeholders.
+Approving/rejecting builds and smart-debug reads use these — one-time. `/percy-gate`'s approve/reject (`POST /reviews`) and `/percy-review`'s network-logs probe authenticate with **`BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY`** (HTTP Basic), not the project `PERCY_TOKEN` — a project token returns 403 on those endpoints.
+
+**Check for existing creds first** — same order as Step 1: the shell environment (`BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` already exported), then the same project secrets files (`.env`, `.env.local`, `.env.test`, `.envrc`, `.percy/.env`, `cypress.env.json`) — grep for both names. If found but not loaded, wire the loading rather than asking again.
+
+**If missing, guide the user:** BrowserStack Dashboard → **Account** → **"Access Key"** (the username is shown alongside it). Persist `BROWSERSTACK_USERNAME=` / `BROWSERSTACK_ACCESS_KEY=` placeholder lines to the **same gitignored secrets file** Step 1 used — the user pastes the actual values **in their editor**, never in chat; the agent writes only the placeholders.
 
 **Verify with an authed probe:**
 ```
-curl -sS -o /dev/null -w "%{http_code}" -u "$PERCY_USERNAME:$PERCY_ACCESS_KEY" -H "User-Agent: $PERCY_PLUGIN_UA" \
+curl -sS -o /dev/null -w "%{http_code}" -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" -H "User-Agent: $PERCY_PLUGIN_UA" \
   "https://percy.io/api/v1/network-logs?comparison_id=<any recent comparison id>"
 ```
 Any **non-401** response confirms the creds are live (a 404/422 on a stale comparison id still proves auth). If the project has no comparison yet (cold start), skip the probe and say so — the creds get exercised on the first gate action.

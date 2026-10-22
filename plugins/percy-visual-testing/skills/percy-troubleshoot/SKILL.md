@@ -21,7 +21,7 @@ If the diagnosis points at a *build-launch* problem (browser, test runner, agent
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.1 (agent=<agent>; channel=<channel>; role=<role>; skill=troubleshoot; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.2 (agent=<agent>; channel=<channel>; role=<role>; skill=troubleshoot; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -85,7 +85,7 @@ The stable, high-frequency issues. If a probe result or the user's symptom match
 | 1 | Every API call `401` | `PERCY_TOKEN` missing/invalid/revoked | Step 2b; re-copy from Percy project settings via `/percy-setup` |
 | 2 | Uploads work, review-loop reads `403` | Token role is `write_only` | Switch to the `master`-role token (`/percy-setup` Step 1) |
 | 3 | `403` with a *valid* token, esp. from scripts | Cloudflare blocking the client's User-Agent — **intermittent** (varies by network/IP reputation) | Retry the identical call with `User-Agent: curl/8.7.1`: 403 persists → it's the token role (row 2), not the UA. Keep the header on all calls regardless — free insurance |
-| 4 | `401 No user found` on approve/reject or network-logs | Those endpoints need BrowserStack user creds, not the project token | `PERCY_USERNAME` + `PERCY_ACCESS_KEY` via `/percy-setup` Step 1c |
+| 4 | `401 No user found` on approve/reject or network-logs | Those endpoints need BrowserStack user creds, not the project token | `BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` via `/percy-setup` Step 1c |
 | 5 | Every build shows every snapshot as new / diffs never appear | No approved baseline, or `default-base-branch` ≠ repo default (Percy defaults to `master`) | Approve the baseline build; `PATCH` the project's `default-base-branch` (`/percy-setup` Step 1) |
 | 6 | Diffs exist but no AI verdicts on a **large** build | AI summary skipped: `ai-details.summary-status: "skipped"`, `summary-reason: "too_many_comparisons"` | Expected behavior — `/percy-review` falls back to per-comparison scan; split the suite if summaries matter |
 | 7 | No AI verdicts on a normal-size build | Cold start (baseline unapproved), free tier, or non-AI browser pool | `/percy-review` cold-start Cases A/B first; then its NO-AI cause table |

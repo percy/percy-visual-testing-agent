@@ -21,7 +21,7 @@ In v1, **every reject decision is confirmed by the human** before Percy is actua
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.1 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.2 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -73,7 +73,11 @@ Aggregate (v0.3 verdict tiers):
 
 ### 2. Decide
 
-**Pre-flight — write creds.** Before showing **any** reject/approve confirm, check `write_creds_verified` in `.percy/config.yml` (or `PERCY_USERNAME` + `PERCY_ACCESS_KEY` in the env). If missing, say so up front — "I can classify but can't reject/approve — run `/percy-setup` to add your BrowserStack access key" — and present the verdicts as recommendations with dashboard deep-links instead. Never walk the user through a y/n confirm and then 401 after they say yes.
+**BrowserStack credentials (approve / flag / network-logs).** These are your **BrowserStack** username + access key — from BrowserStack → Account → Profile — in `BROWSERSTACK_USERNAME` / `BROWSERSTACK_ACCESS_KEY`, the same pair the BrowserStack SDKs use (so teams on BrowserStack Automate usually have them set already). The older names `PERCY_USERNAME` / `PERCY_ACCESS_KEY` are still accepted: use whichever pair is set. Look in the shell environment first, then `.percy/.env` and the repo's other gitignored secrets files (`.env`, `.env.local`, `.envrc`). Never ask the user to paste them into the chat.
+
+**Pre-flight — write creds.** Before showing **any** reject/approve confirm, check `write_creds_verified` in `.percy/config.yml` (or `BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` — or the older `PERCY_USERNAME` + `PERCY_ACCESS_KEY` — in the env or `.percy/.env`). If missing, say so **at the top**, in one line, with the fix — *"I can't approve or flag yet: add `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` (BrowserStack → Account → Profile) to `.percy/.env` in your editor, then re-run"* — and present the Percy actions as recommendations with dashboard deep-links instead. Never walk the user through a y/n confirm and then 401 after they say yes. **Questions that don't need Percy credentials — like the bug-reporting route (Step R2) — are still asked as real choices.**
+
+**Ask questions as real choices.** Every confirm and every multiple-choice question (approve? flag? which reporting route? save to repo or just for me?) goes through your agent's structured question tool when it has one — Claude Code's ask-user-question tool, Copilot's or another IDE's equivalent — with the recommended option first and labeled *(Recommended)*. Only when no such tool exists, ask one numbered question at a time in plain text and wait for the answer. Never bury a question inside a paragraph or a bullet list.
 
 **Case D — the build was already rejected by a human (check this FIRST):**
 
@@ -93,7 +97,7 @@ If `/percy-review` ran in **regression mode** (regression branch / non-PR / sche
 
 | Bucket | What's in it | Action |
 |---|---|---|
-| ✅ **Explained** | `expected` — matches a merged PR (cite PR#; mark weak-intent matches) | Approve (snapshot-scoped), one confirm for the batch |
+| ✅ **Explained** | `expected` — matches a merged PR (link the PR and say what the match rests on — see the table rules) | Approve (snapshot-scoped), one confirm for the batch |
 | 🔁 **Noise** | `expected` (noise) / `likely-flaky-test` — dynamic content, rendering variation, flaky capture per history | Approve with the explained batch — list them separately so the user sees what's noise |
 | ⚠️ **Unexplained** | `unplanned-change` — Percy says valid, but nothing merged explains it (possible deploy, rollback, config or data change) | **Do not approve.** Flag via `request_changes`, then report (Step R2) |
 | 🛑 **Anomaly** | `likely-bug` — Percy flagged a defect that nothing merged explains, or an explained surface that changed in a broken-looking way | Flag via `request_changes`, then report (Step R2) |
@@ -124,7 +128,10 @@ Rules for the table:
 - **One row per snapshot** (that's what gets approved or flagged). If a snapshot has several changes, list them in "What changed" and give the worst bucket.
 - **Every PR citation is a Markdown link** with the PR title, plus the file(s) that explain the change — the user will open the PR's *Files changed* tab to show it. Never a bare "#12".
 - **Every "Open" link points into THIS build** (`…/builds/<this build>/changed/<snapshot_id>`). Earlier builds may be linked only in the "Still unresolved" section below, clearly labeled as earlier.
-- **Weak intent** (PR without an intent section): say *"matched on the PR title and diff (no intent section)"* in Why.
+- **Say what the explanation rests on, plainly and confidently** — never jargon like "weak intent". Three cases:
+  - PR has a Percy Visual Intent section that covers it → *"[PR #12 Brand refresh](…): its Visual Intent says primary buttons go teal; changes `assets/site.css`."*
+  - No Visual Intent section, but the PR's **code change** clearly produces it → *"[PR #13 Footer tagline](…) edits this exact footer line in `blog.html`."* This is a strong match — state it as fact; at most add *"(the PR has no Visual Intent section, so this is matched on its code change)"*.
+  - Only the PR's **title or description** points to it and the code change doesn't show it clearly → *"Probably [PR #14 Pricing copy](…): its description mentions price labels, but its code change doesn't show this line — worth a glance."* Suggested action: *"Approve after a quick look"*. This is the only case that should sound tentative.
 - After the table, one line of totals: *"Approve 4 · Flag 1 · Needs your eyes 0"*.
 
 **🔁 Still unresolved from earlier runs** (only if Step R0 found any) — a second, short table: Snapshot · flagged in [build #<n> ↗](<that snapshot in the earlier build>) · ticket link · now: *"no diff tonight — Percy auto-approved it because nothing changed since the flagged capture; the problem is still live"* · [current capture ↗](<this build>).
@@ -277,13 +284,13 @@ Wait for human confirmation. This single yes authorizes **both** the Percy rejec
 
 Both actions hit the same Percy reviews endpoint, with different `action` values. Auth differs from reads:
 
-- Both `reject` and `approve` require **BrowserStack user credentials** (`PERCY_USERNAME` + `PERCY_ACCESS_KEY`), not the project `PERCY_TOKEN`.
+- Both `reject` and `approve` require **BrowserStack user credentials** (`BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY`), not the project `PERCY_TOKEN`.
 - Project tokens return 403 on `/reviews`.
 
 **On confirm: reject** (Case C):
 ```
 POST /api/v1/reviews
-Authorization: Basic <base64(PERCY_USERNAME:PERCY_ACCESS_KEY)>
+Authorization: Basic <base64(BROWSERSTACK_USERNAME:BROWSERSTACK_ACCESS_KEY)>
 User-Agent: $PERCY_PLUGIN_UA
 Content-Type: application/vnd.api+json
 
@@ -304,7 +311,7 @@ Content-Type: application/vnd.api+json
 **On confirm: approve** (Case A):
 ```
 POST /api/v1/reviews
-Authorization: Basic <base64(PERCY_USERNAME:PERCY_ACCESS_KEY)>
+Authorization: Basic <base64(BROWSERSTACK_USERNAME:BROWSERSTACK_ACCESS_KEY)>
 User-Agent: $PERCY_PLUGIN_UA
 Content-Type: application/vnd.api+json
 
@@ -401,5 +408,5 @@ If `/percy-review` returns NO-INTENT degraded output (verdicts like `candidate-b
 - **The delta-gate matters more than the iteration cap.** If iteration 2 has the same bugs as iteration 1, the agent isn't converging — stop early.
 - **Snapshot budget protects the user's Percy quota.** Don't iterate past it even if other conditions allow.
 - **State is per-session.** If the user closes the IDE and reopens, the iteration counter resets. That's intentional — a fresh session deserves a fresh budget.
-- **Reject and approve use the same auth.** Both actions hit `POST /api/v1/reviews` with HTTP Basic Auth (`PERCY_USERNAME` + `PERCY_ACCESS_KEY`, BrowserStack creds), not the project `PERCY_TOKEN`. Only the `action` field differs (`"reject"` vs `"approve"`).
+- **Reject and approve use the same auth.** Both actions hit `POST /api/v1/reviews` with HTTP Basic Auth (`BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY`, BrowserStack creds), not the project `PERCY_TOKEN`. Only the `action` field differs (`"reject"` vs `"approve"`).
 - **Auto-approve is symmetric with auto-reject.** Both require human confirmation in v1; both stop without calling the API if the user declines; both refuse to fire in NO-AI or NO-INTENT degraded modes. Treat them as mirrored paths — same guardrails, same auth, same UX.
