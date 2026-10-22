@@ -40,7 +40,7 @@ This skill therefore:
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.2 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.3 (agent=<agent>; channel=<channel>; role=<role>; skill=review; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -82,7 +82,7 @@ Poll `GET /builds/<id>` every 15 seconds. Acceptable terminal states:
 
 Stop on `failed` and report `failure-reason`. Timeout after 15 minutes — surface to the user and ask whether to keep waiting.
 
-**One more gate before Step 4:** `all-ai-jobs-completed: true` does NOT mean the cluster summary is ready — `ai-details.summary-status` can still read `"processing"` for a while after. Keep polling until `summary-status ∈ {ok, skipped}` before fetching the build summary, or Step 4 reads an empty include.
+**The cluster summary can lag well behind the AI jobs.** `all-ai-jobs-completed: true` does not mean the summary is ready — `ai-details.summary-status` can read `"processing"` for minutes, and has been seen stuck past 10 minutes. The summary is only used to **group** comparisons (Step 5 reads every comparison directly), so: once all AI jobs are done, wait up to ~2 minutes for `summary-status ∈ {ok, skipped}`; if it's still processing, **go ahead without it** — group by snapshot — and say so in one line (*"Percy's change summary isn't ready yet, so changes are grouped by snapshot"*). Never block the review on the summary.
 
 Print one status line per poll (e.g., `polling build #41 · state=processing · ai-jobs=in-progress · 45s elapsed`). Don't spam.
 
@@ -201,7 +201,13 @@ Priority:
 3. **Conversation context** — reconstruct from current session (only if it covers the changes in the build).
 4. **Regression mode — accumulated intent from merged PRs.** A build is a **regression run** when it's on the configured **`regression_branch`** from `.percy/config.yml` (set by `/percy-setup` — often a dedicated branch like `pre_prod` or `qa`, NOT the default branch), or it's non-PR-linked on the default branch, or the user says so. The expectation is NOT simply "nothing changed": PRs merged since the last approved baseline *legitimately* changed the UI, and the test suite may have been updated to match. Build the intent like this:
    1. **Anchor on Percy's own baseline for THIS build — one build at a time.** Percy diffs this build against its `relationships.base-build` (usually the previous build on the branch, **whether or not anyone reviewed it**). The diffs you are triaging are exactly "base build → this build", so the explaining window is **the base build's `created-at` → this build's `created-at`**, and every finding and link refers to **this build only**. Never mix findings from two builds into one triage.
-      - **Unreviewed gap — say it once, then let the user choose.** If the base build is **not** `approved` (it's `unreviewed`, or `changes_requested` from an earlier triage), and it is newer than the last approved build on the branch, changes from that older run are baked into this build's baseline and **won't show up as diffs here**. Say so in one line before triaging: *"Heads-up: last night's baseline (build #N) was never fully reviewed — its changes won't appear in this run. Triage #N first (recommended), or triage this build only?"* On "#N first", triage #N as its own run (its own table, its own confirms), then come back. (For `changes_requested` bases, the open flags are handled by `/percy-gate` Step R0, not by re-triaging.)
+      - **Several unreviewed runs — recommend the latest, show the rest, let the user choose.** Teams often leave nightlies unreviewed (someone spots a problem, tells the team, never clicks approve or reject). Before triaging, list the regression branch's builds **since the last approved one** (`GET /builds?filter[branch]=<branch>` — newest first, stop at the first `approved`). If there is more than one unreviewed / `changes_requested` run, ask once, as a real choice:
+        > *"3 nightly runs since the last approved one (#40, Sun):*
+        > *• **#43 Wed (latest) — 5 changed snapshots, 1 Percy bug flag** (Recommended)*
+        > *• #42 Tue — 3 changed snapshots, 0 bug flags*
+        > *• #41 Mon — 2 changed snapshots, 1 bug flag*
+        > *#43 shows what changed since Tuesday; Monday's and Tuesday's changes are already part of its baseline, so they won't appear in it. Triage #43, pick another run, or go through them oldest → newest?"*
+        Counts come from each build's `total-comparisons-diff` / changed snapshots and `ai-details.total-potential-bugs` (one cheap call per build). Recommend the **latest** run. If the user picks another, triage that one; "oldest → newest" triages each in turn, each with its own table and confirms. With only one unreviewed run, don't ask — just triage it. Never merge findings from two runs into one table. (Open flags on a `changes_requested` run are carried forward by `/percy-gate` Step R0.)
    2. **List the PRs merged in the gap.**
       - **Same repo** (app + suite live together): a SHA range works — `git log <last>..<head> --merges` / `gh pr list --state merged --base <regression_branch>`.
       - **Cross-repo — `app_repos` configured in `.percy/config.yml`: harvest with a TIME WINDOW, not a SHA range.** QA-repo SHAs don't exist in the app repos, so a SHA range is meaningless there. Window = this build's base build `created-at` → this build's `created-at` (step 1). Per app repo: `gh pr list -R <owner/name> --state merged --search "merged:<window-start>..<window-end>"`.

@@ -50,7 +50,7 @@ One command to start — new to Percy, it walks you through account, token, and 
 
 You'll need your project's **`PERCY_TOKEN`** in the environment (Percy dashboard → project settings) — setup checks for it and tells you exactly what to do if it's missing. Never paste tokens into the chat. Approving/rejecting builds additionally uses your BrowserStack username + access key; setup covers that too.
 
-> **What the plugin sends.** Every Percy API call carries a `User-Agent` like `percy-visual-testing-agent/0.4.2 (agent=copilot-vscode; channel=install-sh-copilot; role=qa; skill=gate; install=3f9c2a1e) curl/8.7.1` — which coding agent, which workflow, and a random per-repo id. No names, emails, tokens or repo names.
+> **What the plugin sends.** Every Percy API call carries a `User-Agent` like `percy-visual-testing-agent/0.4.3 (agent=copilot-vscode; channel=install-sh-copilot; role=qa; skill=gate; install=3f9c2a1e) curl/8.7.1` — which coding agent, which workflow, and a random per-repo id. No names, emails, tokens or repo names.
 
 > **MCP is optional.** The plugin talks to Percy's REST API directly — no MCP server required. If you already use the BrowserStack MCP server, the plugin will happily use it where it helps.
 

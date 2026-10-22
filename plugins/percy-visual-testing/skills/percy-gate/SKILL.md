@@ -21,7 +21,7 @@ In v1, **every reject decision is confirmed by the human** before Percy is actua
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.2 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.3 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -73,7 +73,7 @@ Aggregate (v0.3 verdict tiers):
 
 ### 2. Decide
 
-**BrowserStack credentials (approve / flag / network-logs).** These are your **BrowserStack** username + access key — from BrowserStack → Account → Profile — in `BROWSERSTACK_USERNAME` / `BROWSERSTACK_ACCESS_KEY`, the same pair the BrowserStack SDKs use (so teams on BrowserStack Automate usually have them set already). The older names `PERCY_USERNAME` / `PERCY_ACCESS_KEY` are still accepted: use whichever pair is set. Look in the shell environment first, then `.percy/.env` and the repo's other gitignored secrets files (`.env`, `.env.local`, `.envrc`). Never ask the user to paste them into the chat.
+**BrowserStack credentials (approve / flag / network-logs).** These are your **BrowserStack** username + access key — from BrowserStack → Account → Profile — in `BROWSERSTACK_USERNAME` / `BROWSERSTACK_ACCESS_KEY`, the same pair the BrowserStack SDKs use (so teams on BrowserStack Automate usually have them set already). The older names `PERCY_USERNAME` / `PERCY_ACCESS_KEY` are still accepted: use whichever pair is set. Look in `.percy/.env` and the repo's other gitignored secrets files (`.env`, `.env.local`, `.envrc`) first, then the shell environment. **People often have more than one BrowserStack account, so check the pair can see this project before relying on it:** `GET /api/v1/builds/<build id>` with HTTP Basic auth must return 200. If the first pair gets 401/403 and another pair is available (e.g. `BROWSERSTACK_*` in the shell vs `PERCY_*` or the repo's `.percy/.env`), try that one. If none can, say so plainly — *"Your BrowserStack credentials (`<username>`) don't have access to this Percy project — use an account in the project's Percy organization"* — and continue in recommendation mode. Never ask the user to paste credentials into the chat.
 
 **Pre-flight — write creds.** Before showing **any** reject/approve confirm, check `write_creds_verified` in `.percy/config.yml` (or `BROWSERSTACK_USERNAME` + `BROWSERSTACK_ACCESS_KEY` — or the older `PERCY_USERNAME` + `PERCY_ACCESS_KEY` — in the env or `.percy/.env`). If missing, say so **at the top**, in one line, with the fix — *"I can't approve or flag yet: add `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` (BrowserStack → Account → Profile) to `.percy/.env` in your editor, then re-run"* — and present the Percy actions as recommendations with dashboard deep-links instead. Never walk the user through a y/n confirm and then 401 after they say yes. **Questions that don't need Percy credentials — like the bug-reporting route (Step R2) — are still asked as real choices.**
 
