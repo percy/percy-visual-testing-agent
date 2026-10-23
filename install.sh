@@ -55,7 +55,7 @@ if ! grep -q "Visual review (Percy)" AGENTS.md 2>/dev/null; then
 ## Visual review (Percy)
 <!-- percy-hook v3 role=qa -->
 
-This repo is a Percy regression/QA suite. Morning triage: run `/percy-gate` — it resolves the latest build on the configured regression branch (run `/percy-setup` once to set it), classifies every diff (merged app-PR intent / dynamic noise / anomaly), and one confirm approves an all-explained run.
+This repo is a Percy regression/QA suite. Morning triage: run `/percy-gate` — it resolves the latest build on the configured regression branch (run `/percy-setup` once to set it), classifies every diff (explained by what shipped / dynamic noise / looks deliberate / anomaly), and one confirm approves an all-explained run.
 
 Outside Claude Code, "/percy-X" means: read `.percy/skills/percy-X.md` and follow it.
 EOF

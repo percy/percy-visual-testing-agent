@@ -19,7 +19,7 @@ One-time configuration so the other Percy skills (`/percy-visual-intent`, `/perc
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.4 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.5 (agent=<agent>; channel=<channel>; role=<role>; skill=setup; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -252,7 +252,7 @@ This repo uses the Percy Visual Testing plugin. When you change UI code:
 ## Visual review (Percy)
 <!-- percy-hook v3 role=qa -->
 
-This repo is a Percy regression/QA suite. Morning triage: run `/percy-gate` — it resolves the latest build on `<regression_branch>`, classifies every diff (merged app-PR intent / dynamic noise / anomaly), and one confirm approves an all-explained run.
+This repo is a Percy regression/QA suite. Morning triage: run `/percy-gate` — it resolves the latest build on `<regression_branch>`, classifies every diff (explained by what shipped / dynamic noise / looks deliberate / anomaly), and one confirm approves an all-explained run.
 ```
 
 (`repo_role: both` → include both blocks under the one heading, marked `<!-- percy-hook v3 role=both -->`.)
