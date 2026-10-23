@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Visual testing plugin for agentic coding tools — enforces a Percy review loop inside any AI IDE.",
-    "version": "0.4.5"
+    "version": "0.4.6"
   },
   "plugins": [
     {

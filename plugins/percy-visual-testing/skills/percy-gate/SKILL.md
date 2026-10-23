@@ -21,7 +21,7 @@ In v1, **every reject decision is confirmed by the human** before Percy is actua
 Send one identifying User-Agent on **every** Percy REST call (it is how Percy tells plugin traffic apart — no personal data). Build it once per run:
 
 ```
-PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.5 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
+PERCY_PLUGIN_UA="percy-visual-testing-agent/0.4.6 (agent=<agent>; channel=<channel>; role=<role>; skill=gate; install=<install_id>) curl/8.7.1"
 ```
 
 - `agent` — `claude-code` if `CLAUDECODE=1` is set; `gemini-cli` if `GEMINI_CLI=1` is set; otherwise name the coding agent you are running in: `copilot-vscode`, `copilot-jetbrains`, `copilot-vs`, `copilot-cli`, `cursor`, `codex`, `gemini-code-assist`, `antigravity` — or `unknown` if unsure.
@@ -171,7 +171,7 @@ Reporting goes wherever *this team* reports bugs. Don't assume Jira or GitHub.
    - **New ticket per anomaly**
    - **One ticket for the whole run** (anomalies as a checklist)
    - **Comment on the existing ticket of the suspected PR** (the Jira key or issue linked from the PR merged in the window)
-   - **GitHub issue in the app repo**
+   - **GitHub issue in the app repo** (only when `app_repos` is non-empty; a no-access team has no app repo to file into)
    - **Something else** (Slack channel, internal tracker) → you draft the text for the user to paste
    - **Don't report**
 3. Ask only the details that route needs (project key, issue type, labels, component; never assignee unless they name one). **For Jira, read the project's create metadata first** (issue types + required fields — via your Jira tool, or `GET /rest/api/3/issue/createmeta/<project>/issuetypes/<typeId>`) and offer the real options: enterprise projects often **don't have the type you'd guess** (e.g. no `Task`) and **require custom fields** (e.g. *Source*, *Work category*) that make a create fail with 400 until set. Ask for each required field once, using its allowed values, and save the choices so later runs file in one step.
